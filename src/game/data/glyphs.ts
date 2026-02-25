@@ -50,7 +50,7 @@ export const GLYPH_TO_TILE: Record<string, number> = {
     '#': TileIndex.SOLID,
     '.': -1,                       // Air / empty
     'S': -1,                       // Player spawn (position marker only)
-    'D': TileIndex.DOOR,
+    'D': -1,                       // Door (handled separately)
     '~': TileIndex.THIN_PLATFORM,
     '^': TileIndex.SPIKES,
     '=': TileIndex.CRACKED_FLOOR,

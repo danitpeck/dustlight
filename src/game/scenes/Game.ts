@@ -1,7 +1,7 @@
 import Phaser from 'phaser';
 import { parseRoom, ROOM_WIDTH, ROOM_HEIGHT } from '../rooms/parser';
 import { ROOMS, STARTING_ROOM } from '../rooms/index';
-import { getSolidTileIndices } from '../data/glyphs';
+import { getSolidTileIndices, TileIndex } from '../data/glyphs';
 import { Player } from '../entities/Player';
 
 /** Tile size in pixels */
@@ -59,6 +59,16 @@ export class Game extends Phaser.Scene {
 
         // Collision on solid tiles (terrain set pieces + cracked floor + phase wall)
         this.map.setCollision(getSolidTileIndices());
+
+        // ─── Thin platforms: one-way collision (land on top, pass through below) ───
+        this.map.setCollision(TileIndex.THIN_PLATFORM);
+        this.layer.forEachTile((tile) => {
+            if (tile.index === TileIndex.THIN_PLATFORM) {
+                tile.collideDown = false;
+                tile.collideLeft = false;
+                tile.collideRight = false;
+            }
+        });
 
         // ─── Player spawn ───
         const playerSpawn = spawns.find(s => s.glyph === 'S');

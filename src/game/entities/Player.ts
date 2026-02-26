@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
-import { MOVE, ATTACK, PLAYER_HP } from '../data/constants';
+import { MOVE, ATTACK, PLAYER_HP, WALL } from '../data/constants';
+import { WallClingState, createWallClingState, updateWallCling } from '../systems/wallCling';
 
 // Re-export so existing imports from Player still work
 export { MOVE, ATTACK, PLAYER_HP };
@@ -44,6 +45,8 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
     private _droppingThrough = false;
     /** Failsafe timer: auto-clear dropping flag after this many ms */
     private dropTimer = 0;
+    /** Wall cling & wall jump state (pure state machine) */
+    private wallClingState: WallClingState = createWallClingState();
 
     /** ms remaining in the coyote-time window */
     private coyoteTimer = 0;
@@ -79,6 +82,9 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
 
     /** Public read-only: is the moth currently dropping through a thin platform? */
     get droppingThrough(): boolean { return this._droppingThrough; }
+
+    /** Public read-only: is the moth clinging to a wall? */
+    get isWallClinging(): boolean { return this.wallClingState.clingSide !== null && this.wallClingState.clingGraceTimer > 0; }
 
     /** The attack hitbox zone — use for overlap checks in the scene */
     get meleeZone(): Phaser.GameObjects.Zone { return this.attackHitbox; }
@@ -172,7 +178,13 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
         const left = this.cursors.left.isDown || this.wasd.A.isDown;
         const right = this.cursors.right.isDown || this.wasd.D.isDown;
 
-        if (left) {
+        // Wall cling system may lock input after a wall jump
+        const wallLocked = this.wallClingState.inputLockTimer > 0;
+
+        if (wallLocked) {
+            // During input lock, don't let the player override horizontal velocity
+            body.setAccelerationX(0);
+        } else if (left) {
             body.setAccelerationX(-MOVE.ACCEL);
             this.setFlipX(true);
         } else if (right) {
@@ -184,7 +196,17 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
 
         // ─── Animation ───
         const moving = left || right;
-        if (!onGround) {
+        const clinging = this.wallClingState.clingSide !== null
+            && this.wallClingState.clingGraceTimer > 0
+            && ((this.wallClingState.clingSide === 'left' && left && body.blocked.left)
+             || (this.wallClingState.clingSide === 'right' && right && body.blocked.right));
+
+        if (clinging) {
+            // Wall cling — jump frame, facing INTO the wall
+            this.stop();
+            this.setFrame(MOTH_JUMP);
+            this.setFlipX(this.wallClingState.clingSide === 'right');
+        } else if (!onGround) {
             // Airborne — jump frame
             this.stop();
             this.setFrame(MOTH_JUMP);
@@ -256,6 +278,37 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
         }
 
         this.jumpWasDown = jumpHeld;
+
+        // ─── Wall cling & wall jump ───
+        const wallResult = updateWallCling(this.wallClingState, {
+            onGround,
+            blockedLeft: body.blocked.left,
+            blockedRight: body.blocked.right,
+            holdingLeft: left,
+            holdingRight: right,
+            jumpJustPressed,
+            velocityY: body.velocity.y,
+            delta,
+        });
+        this.wallClingState = wallResult.state;
+
+        if (wallResult.didWallJump) {
+            // Wall jump: apply velocity and cancel normal jump state
+            body.setVelocityY(wallResult.newVelocityY!);
+            body.setVelocityX(wallResult.newVelocityX!);
+            this.isJumping = true; // allow variable height cut
+            this.coyoteTimer = 0;
+            this.jumpBufferTimer = 0;
+            // Face away from wall
+            this.setFlipX(wallResult.newVelocityX! < 0);
+        } else {
+            if (wallResult.newVelocityY !== null) {
+                body.setVelocityY(wallResult.newVelocityY);
+            }
+            if (wallResult.newVelocityX !== null) {
+                body.setVelocityX(wallResult.newVelocityX);
+            }
+        }
 
         // ─── Melee attack ───
         this.attackCooldown -= delta;

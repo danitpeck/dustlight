@@ -34,3 +34,12 @@ export const PLAYER_HP = {
     KNOCKBACK_X:  150,   // px/s horizontal knockback impulse
     KNOCKBACK_Y: -180,   // px/s upward pop on hit
 } as const;
+
+/** Wall cling & wall jump tuning. */
+export const WALL = {
+    SLIDE_VEL:      40,  // px/s — max downward speed while clinging
+    JUMP_VEL_X:    160,  // px/s — horizontal kick-off from wall
+    JUMP_VEL_Y:   -260,  // px/s — vertical impulse on wall jump
+    CLING_GRACE_MS: 80,  // ms after leaving wall where wall-jump still works
+    INPUT_LOCK_MS: 150,  // ms of forced horizontal velocity after wall jump
+} as const;

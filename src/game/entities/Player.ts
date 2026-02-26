@@ -1,5 +1,8 @@
 import Phaser from 'phaser';
-import { TileIndex } from '../data/glyphs';
+import { MOVE, ATTACK, PLAYER_HP } from '../data/constants';
+
+// Re-export so existing imports from Player still work
+export { MOVE, ATTACK, PLAYER_HP };
 
 /**
  * Moth sprite — row 14 on the Kenney 1-Bit spritesheet.
@@ -8,42 +11,6 @@ import { TileIndex } from '../data/glyphs';
 const MOTH_IDLE = 14 * 20 + 1;  // 281 (side-facing)
 const MOTH_JUMP = 14 * 20 + 4;  // 284 (airborne)
 const MOTH_WALK_FRAMES = [14 * 20 + 1, 14 * 20 + 2, 14 * 20 + 3, 14 * 20 + 2]; // 281, 282, 283, 282 — classic 1-2-3-2 cycle
-
-/**
- * Movement tuning constants.
- * Tweak these until the moth feels ~just right~.
- *
- * All extracted as plain data so they're easy to test
- * and eventually feed into a debug editor.
- */
-export const MOVE = {
-    MAX_RUN:      130,   // px/s — max horizontal speed
-    ACCEL:        900,   // px/s² — run acceleration (snappy!)
-    DRAG:         700,   // px/s² — deceleration when no input
-    JUMP_VEL:    -280,   // px/s — initial upward impulse (negative = up)
-    JUMP_CUT:     0.4,   // multiplier applied to velocityY on early release
-    COYOTE_MS:     80,   // ms grace period after leaving a ledge
-    BUFFER_MS:    100,   // ms jump-press memory before landing
-} as const;
-
-/** Melee attack tuning constants. */
-export const ATTACK = {
-    DURATION_MS:  150,   // ms the hitbox stays active
-    COOLDOWN_MS:  300,   // ms before you can attack again
-    RANGE_X:       14,   // px offset from moth center (horizontal)
-    RANGE_Y:       -2,   // px offset from moth center (vertical)
-    WIDTH:         12,   // hitbox width in px
-    HEIGHT:        14,   // hitbox height in px
-} as const;
-
-/** Player survivability tuning. */
-export const PLAYER_HP = {
-    MAX:            3,   // starting / max hit points
-    INVULN_MS:   1200,   // ms of invulnerability after taking damage
-    BLINK_MS:     100,   // ms per blink cycle during invuln
-    KNOCKBACK_X:  150,   // px/s horizontal knockback impulse
-    KNOCKBACK_Y: -180,   // px/s upward pop on hit
-} as const;
 
 /**
  * Player entity — the Moth.
@@ -73,11 +40,9 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
     private blinkTimer = 0;
     /** Whether the moth is dead (awaiting respawn) */
     private _dead = false;
-    /** Thin-platform tiles whose collideUp was temporarily disabled for drop-through */
-    private dropTiles: Phaser.Tilemaps.Tile[] = [];
-    /** Y threshold: once moth's feet are past this, restore the tiles */
-    private dropRestoreY = 0;
-    /** Failsafe timer: force-restore tiles after this many ms */
+    /** True while the moth is dropping through a thin platform */
+    private _droppingThrough = false;
+    /** Failsafe timer: auto-clear dropping flag after this many ms */
     private dropTimer = 0;
 
     /** ms remaining in the coyote-time window */
@@ -111,6 +76,9 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
 
     /** Public read-only: is the moth in invuln frames? */
     get invulnerable(): boolean { return this.invulnTimer > 0; }
+
+    /** Public read-only: is the moth currently dropping through a thin platform? */
+    get droppingThrough(): boolean { return this._droppingThrough; }
 
     /** The attack hitbox zone — use for overlap checks in the scene */
     get meleeZone(): Phaser.GameObjects.Zone { return this.attackHitbox; }
@@ -249,57 +217,28 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
 
         const downHeld = this.cursors.down.isDown || this.wasd.S.isDown;
 
-        // ─── Drop-through: restore tiles once moth clears them ───
-        if (this.dropTiles.length > 0) {
+        // ─── Drop-through: clear flag once moth lands or timer expires ───
+        if (this._droppingThrough) {
             this.dropTimer -= delta;
-            // Restore when: feet are past the tile, OR she landed on something, OR failsafe timer expired
-            if (body.bottom >= this.dropRestoreY || (onGround && !downHeld) || this.dropTimer <= 0) {
-                for (const tile of this.dropTiles) {
-                    tile.collideUp = true;
-                }
-                this.dropTiles = [];
+            if ((onGround && !downHeld) || this.dropTimer <= 0) {
+                this._droppingThrough = false;
             }
         }
 
         // ─── Drop-through: Down on a thin platform ───
 
-        if (downHeld && onGround && this.dropTiles.length === 0) {
-            // Find the thin-platform tile(s) directly under the moth's feet
-            const layer = (this.scene as Phaser.Scene & { layer: Phaser.Tilemaps.TilemapLayer }).layer;
-            if (layer) {
-                const feetY = body.bottom + 1; // 1px below feet
-                const leftX = body.left + 1;
-                const rightX = body.right - 1;
+        if (downHeld && onGround && !this._droppingThrough) {
+            // Set the drop flag — the platform collider's process callback
+            // in Game.ts will skip collision, letting the moth fall through.
+            // If she's on solid ground (not a platform), this flag is harmless.
+            this._droppingThrough = true;
+            this.dropTimer = 500; // failsafe
+            body.setVelocityY(20); // tiny nudge
 
-                const tilesToDrop: Phaser.Tilemaps.Tile[] = [];
-                // Check tiles under left and right edges of the body
-                for (const wx of [leftX, rightX]) {
-                    const tile = layer.getTileAtWorldXY(wx, feetY);
-                    if (tile && tile.index === TileIndex.THIN_PLATFORM && tile.collideUp) {
-                        if (!tilesToDrop.includes(tile)) {
-                            tilesToDrop.push(tile);
-                        }
-                    }
-                }
-
-                if (tilesToDrop.length > 0) {
-                    // Disable collideUp on just those tiles
-                    for (const tile of tilesToDrop) {
-                        tile.collideUp = false;
-                    }
-                    this.dropTiles = tilesToDrop;
-                    // Restore once moth's feet are past the tile's bottom edge
-                    this.dropRestoreY = (tilesToDrop[0].y + 1) * 16; // tile y is row index
-                    this.dropTimer = 500; // failsafe: force-restore after 500ms no matter what
-
-                    body.setVelocityY(20); // tiny nudge to start falling
-
-                    // Consume the jump so she doesn't also bounce upward
-                    this.jumpBufferTimer = 0;
-                    this.jumpWasDown = jumpHeld;
-                    return;
-                }
-            }
+            // Consume the jump so she doesn't also bounce upward
+            this.jumpBufferTimer = 0;
+            this.jumpWasDown = jumpHeld;
+            return;
         }
 
         // ─── Execute jump ───

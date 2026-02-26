@@ -24,6 +24,8 @@ export class Game extends Phaser.Scene {
     private doorZones: Phaser.GameObjects.Zone[] = [];
     /** Spike hazard zones in the current room */
     private spikeZones: Phaser.GameObjects.Zone[] = [];
+    /** Thin platform physics bodies (separate from tilemap for clean one-way collision) */
+    private platformBodies: Phaser.Physics.Arcade.StaticGroup | null = null;
     /** Whether the scene is in hitstop (freeze frames on melee connect) */
     private hitstopTimer = 0;
     /** Current room ID (for respawn) */
@@ -32,6 +34,8 @@ export class Game extends Phaser.Scene {
     private isTransitioning = false;
     /** Which edge the player should spawn at (null = use S marker) */
     private arrivalEdge: DoorEdge | null = null;
+    /** Player feet Y at end of last frame — for manual platform landing */
+    private prevPlayerFeetY = 0;
 
     constructor() {
         super('Game');
@@ -56,6 +60,18 @@ export class Game extends Phaser.Scene {
             return; // skip all updates — that's the juice!
         }
 
+        // ── Manual one-way platform landing (runs BEFORE tick so onGround is correct) ──
+        this.resolvePlayerPlatforms();
+
+        // ── Snap player Y when grounded to kill sub-pixel jitter ──
+        // Phaser's tilemap separation can leave body.position.y at fractional
+        // values, which causes 1px oscillation at certain tile boundaries.
+        // Rounding when on the ground is invisible and eliminates the flicker.
+        const pBody = this.player.body as Phaser.Physics.Arcade.Body;
+        if (pBody.blocked.down) {
+            pBody.position.y = Math.round(pBody.position.y);
+        }
+
         this.player.tick(time, delta);
 
         for (const enemy of this.enemies) {
@@ -64,6 +80,53 @@ export class Game extends Phaser.Scene {
 
         // Prune dead enemies
         this.enemies = this.enemies.filter(e => e.alive);
+
+        // Snapshot feet Y AFTER everything — used next frame for crossing detection
+        const pb = this.player.body as Phaser.Physics.Arcade.Body;
+        this.prevPlayerFeetY = pb.position.y + pb.height;
+    }
+
+    /**
+     * Manual one-way platform resolution.
+     *
+     * Runs after physics step but before player.tick() so that
+     * body.blocked.down is set correctly for ground detection.
+     *
+     * Logic: if the player's feet crossed a platform's top edge this frame
+     * (were at-or-above last frame, are at-or-below now), snap them onto it.
+     * Completely bypasses Phaser's collision separation — no oscillation possible.
+     */
+    private resolvePlayerPlatforms(): void {
+        if (!this.platformBodies) return;
+        if (this.player.droppingThrough) return;
+
+        const body = this.player.body as Phaser.Physics.Arcade.Body;
+        // Don't land on platforms while jumping upward
+        if (body.velocity.y < 0) return;
+
+        const feetY = body.position.y + body.height;
+        const prevFeetY = this.prevPlayerFeetY;
+
+        for (const child of this.platformBodies.getChildren()) {
+            const sb = (child as Phaser.GameObjects.Zone).body as Phaser.Physics.Arcade.StaticBody;
+            const platTop = sb.position.y;
+            const platLeft = sb.position.x;
+            const platRight = platLeft + sb.width;
+
+            // Horizontal overlap?
+            if (body.position.x + body.width <= platLeft) continue;
+            if (body.position.x >= platRight) continue;
+
+            // Feet crossed or reached the platform top this frame?
+            // prevFeetY <= platTop (was at or above) AND feetY >= platTop (now at or below)
+            if (prevFeetY <= platTop + 1 && feetY >= platTop) {
+                // Snap moth onto the platform
+                body.position.y = platTop - body.height;
+                body.velocity.y = 0;
+                body.blocked.down = true;
+                return;
+            }
+        }
     }
 
     /**
@@ -120,6 +183,10 @@ export class Game extends Phaser.Scene {
             zone.destroy();
         }
         this.spikeZones = [];
+        if (this.platformBodies) {
+            this.platformBodies.destroy(true);
+            this.platformBodies = null;
+        }
         this.player.meleeZone.destroy();
         this.player.slashGraphics.destroy();
         this.player.destroy();
@@ -188,24 +255,9 @@ export class Game extends Phaser.Scene {
         // Collision on solid tiles (terrain set pieces + cracked floor + phase wall)
         this.map.setCollision(getSolidTileIndices());
 
-        // ─── Thin platforms: one-way collision (land on top, pass through below) ───
-        this.map.setCollision(TileIndex.THIN_PLATFORM);
-        this.layer.forEachTile((tile) => {
-            if (tile.index === TileIndex.THIN_PLATFORM) {
-                tile.collideDown = false;
-                tile.collideLeft = false;
-                tile.collideRight = false;
-
-                // Fix Phaser's "interesting faces" optimization:
-                // setCollision() marks the solid tile below as having a collision
-                // neighbor above, stripping its faceTop. That means drop-through
-                // would ghost through solid blocks below thin platforms. Force it back.
-                const below = this.layer.getTileAt(tile.x, tile.y + 1);
-                if (below && below.collides) {
-                    below.faceTop = true;
-                }
-            }
-        });
+        // Thin platform tiles are VISUAL ONLY — no tile collision.
+        // Physics is handled by separate static bodies below.
+        // (This avoids Phaser's tilemap collision bugs at certain Y values.)
 
         // ─── Player spawn ───
         // If arriving from a door, spawn at that edge's door positions.
@@ -247,6 +299,27 @@ export class Game extends Phaser.Scene {
         this.player = new Player(this, spawnX, spawnY);
         this.physics.add.collider(this.player, this.layer);
 
+        // ─── Thin platform zones (for manual landing + enemy collision) ───
+        // NO player collider — landing is handled manually in resolvePlayerPlatforms().
+        // This completely bypasses Phaser's collision separation to avoid oscillation bugs.
+        this.platformBodies = this.physics.add.staticGroup();
+        this.layer.forEachTile((tile) => {
+            if (tile.index === TileIndex.THIN_PLATFORM) {
+                const zone = this.add.zone(
+                    tile.pixelX + TILE_SIZE / 2,
+                    tile.pixelY + TILE_SIZE / 2,
+                    TILE_SIZE,
+                    TILE_SIZE,
+                );
+                this.physics.add.existing(zone, true); // static body
+                this.platformBodies!.add(zone);
+            }
+        });
+
+        // Init prev-feet snapshot for platform crossing detection
+        const initBody = this.player.body as Phaser.Physics.Arcade.Body;
+        this.prevPlayerFeetY = initBody.position.y + initBody.height;
+
         // ─── Entry momentum: carry velocity through door transitions ───
         if (this.arrivalEdge) {
             const body = this.player.body as Phaser.Physics.Arcade.Body;
@@ -268,6 +341,10 @@ export class Game extends Phaser.Scene {
             if (spawn.glyph === 'E') {
                 const crawler = new Crawler(this, worldX, worldY, this.layer);
                 this.physics.add.collider(crawler, this.layer);
+                // Crawlers also walk on thin platform bodies
+                if (this.platformBodies) {
+                    this.physics.add.collider(crawler, this.platformBodies);
+                }
                 this.enemies.push(crawler);
             } else if (spawn.glyph !== 'S') {
                 console.log(`[${roomId}] ${spawn.glyph} spawn at tile (${spawn.col}, ${spawn.row}) → world (${worldX}, ${worldY})`);

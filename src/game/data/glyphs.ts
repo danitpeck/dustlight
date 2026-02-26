@@ -23,7 +23,7 @@ export const TileIndex = {
     THIN_PLATFORM:  63,    // Pass-through platform from below (placeholder — tune later)
     CRACKED_FLOOR:  3,    // Ground Pound breakable (placeholder)
     PHASE_WALL:     4,    // Phase Shift passable (placeholder)
-    SPIKES:         337,  // Spike hazard (row 16, col 17 — placeholder)
+    SPIKES:         122,  // Spike hazard (row 6, col 2)
     DOOR:           56,  // Door / room transition marker (placeholder)
     ABILITY_PICKUP: 168,  // Star/gem for ability pickups (placeholder)
     SECRET_ITEM:    169,  // Hidden collectible (placeholder)

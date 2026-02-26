@@ -17,6 +17,9 @@ export class Boot extends Phaser.Scene {
             spacing: 0,
             margin: 0,
         });
+
+        // VFX sprites
+        this.load.image('slash-vfx', 'assets/sprites/curved-slash.png');
     }
 
     create(): void {

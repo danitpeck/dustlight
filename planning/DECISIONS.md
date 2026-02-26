@@ -105,3 +105,14 @@ Each ability reads differently on the surface vs. hidden layer:
 - Wordless — zero dialogue, zero text boxes on first playthrough
 - Bittersweet and ambiguous ending
 - "The moth is the armor. The cartographer is underneath."
+
+## Level Design Learnings (Feb 25, 2026)
+Discovered through playtesting H1–H3 with actual jump physics:
+
+- **Max jump height is ~3 tiles** with a perfect hold (JUMP_VEL=-280, gravity=800). That's the CEILING — don't design for it as the base case.
+- **Comfortable jump: 2 tiles up, 4 tiles across.** That's what feels good.
+- **Platform-to-platform must account for starting surface.** Jumping from a thin platform (~~) is different from jumping off the floor — the moth's feet position matters.
+- **Floating hazards look wrong.** Spikes should grow from walls/floors, not hover in air. Ground them.
+- **H1 is the welcome mat, not the obstacle course.** Keep starter rooms flat and safe. Tricky platforming belongs in rooms 2+.
+- **Geometry teaches direction.** Stepping ledges toward a door naturally guide the player without words — very on-brand for wordless narrative.
+- **Doors are invisible.** Player walks into void and transitions. No visible door tile — the D glyph maps to -1 (air).

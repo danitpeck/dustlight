@@ -90,7 +90,7 @@ describe('parseRoom', () => {
         expect(() => parseRoom(lines.join('\n'))).toThrow(/Unknown glyph '@'/);
     });
 
-    it('parses door glyphs correctly', () => {
+    it('parses door glyphs as invisible (-1)', () => {
         const room = `\
 ##########DD########
 #..................#
@@ -109,16 +109,13 @@ D..................D
 ########DD##########`;
 
         const { tiles } = parseRoom(room);
-        // Top doors
-        expect(tiles[0][10]).toBe(TileIndex.DOOR);
-        expect(tiles[0][11]).toBe(TileIndex.DOOR);
-        // Left doors
-        expect(tiles[6][0]).toBe(TileIndex.DOOR);
-        expect(tiles[7][0]).toBe(TileIndex.DOOR);
-        // Right doors
-        expect(tiles[6][19]).toBe(TileIndex.DOOR);
-        // Bottom doors
-        expect(tiles[14][8]).toBe(TileIndex.DOOR);
+        // Doors are invisible triggers — they parse to -1 (air)
+        expect(tiles[0][10]).toBe(-1);
+        expect(tiles[0][11]).toBe(-1);
+        expect(tiles[6][0]).toBe(-1);
+        expect(tiles[7][0]).toBe(-1);
+        expect(tiles[6][19]).toBe(-1);
+        expect(tiles[14][8]).toBe(-1);
     });
 
     it('handles all glyph types without throwing', () => {

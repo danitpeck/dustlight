@@ -86,4 +86,4 @@ export function getSolidTileIndices(terrainSet: TerrainSet = TERRAIN_SETS.DEFAUL
  * Glyphs that mark entity spawn positions (not rendered as tiles).
  * The parser extracts these positions separately for the entity system.
  */
-export const ENTITY_GLYPHS = ['S', 'E', 'B'] as const;
+export const ENTITY_GLYPHS = ['S', 'D', 'E', 'B'] as const;

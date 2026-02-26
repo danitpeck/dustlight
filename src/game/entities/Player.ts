@@ -1,10 +1,12 @@
 import Phaser from 'phaser';
+import { TileIndex } from '../data/glyphs';
 
 /**
  * Moth sprite — row 14 on the Kenney 1-Bit spritesheet.
  * Col 0 = front-facing, col 1 = side idle, cols 1-3 = walk cycle, col 4 = jump/airborne.
  */
 const MOTH_IDLE = 14 * 20 + 1;  // 281 (side-facing)
+const MOTH_JUMP = 14 * 20 + 4;  // 284 (airborne)
 const MOTH_WALK_FRAMES = [14 * 20 + 1, 14 * 20 + 2, 14 * 20 + 3, 14 * 20 + 2]; // 281, 282, 283, 282 — classic 1-2-3-2 cycle
 
 /**
@@ -71,6 +73,12 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
     private blinkTimer = 0;
     /** Whether the moth is dead (awaiting respawn) */
     private _dead = false;
+    /** Thin-platform tiles whose collideUp was temporarily disabled for drop-through */
+    private dropTiles: Phaser.Tilemaps.Tile[] = [];
+    /** Y threshold: once moth's feet are past this, restore the tiles */
+    private dropRestoreY = 0;
+    /** Failsafe timer: force-restore tiles after this many ms */
+    private dropTimer = 0;
 
     /** ms remaining in the coyote-time window */
     private coyoteTimer = 0;
@@ -208,7 +216,11 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
 
         // ─── Animation ───
         const moving = left || right;
-        if (onGround && moving) {
+        if (!onGround) {
+            // Airborne — jump frame
+            this.stop();
+            this.setFrame(MOTH_JUMP);
+        } else if (moving) {
             if (!this.anims.isPlaying || this.anims.currentAnim?.key !== 'moth-walk') {
                 this.play('moth-walk');
             }
@@ -233,6 +245,61 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
             this.jumpBufferTimer = MOVE.BUFFER_MS;
         } else {
             this.jumpBufferTimer -= delta;
+        }
+
+        const downHeld = this.cursors.down.isDown || this.wasd.S.isDown;
+
+        // ─── Drop-through: restore tiles once moth clears them ───
+        if (this.dropTiles.length > 0) {
+            this.dropTimer -= delta;
+            // Restore when: feet are past the tile, OR she landed on something, OR failsafe timer expired
+            if (body.bottom >= this.dropRestoreY || (onGround && !downHeld) || this.dropTimer <= 0) {
+                for (const tile of this.dropTiles) {
+                    tile.collideUp = true;
+                }
+                this.dropTiles = [];
+            }
+        }
+
+        // ─── Drop-through: Down on a thin platform ───
+
+        if (downHeld && onGround && this.dropTiles.length === 0) {
+            // Find the thin-platform tile(s) directly under the moth's feet
+            const layer = (this.scene as Phaser.Scene & { layer: Phaser.Tilemaps.TilemapLayer }).layer;
+            if (layer) {
+                const feetY = body.bottom + 1; // 1px below feet
+                const leftX = body.left + 1;
+                const rightX = body.right - 1;
+
+                const tilesToDrop: Phaser.Tilemaps.Tile[] = [];
+                // Check tiles under left and right edges of the body
+                for (const wx of [leftX, rightX]) {
+                    const tile = layer.getTileAtWorldXY(wx, feetY);
+                    if (tile && tile.index === TileIndex.THIN_PLATFORM && tile.collideUp) {
+                        if (!tilesToDrop.includes(tile)) {
+                            tilesToDrop.push(tile);
+                        }
+                    }
+                }
+
+                if (tilesToDrop.length > 0) {
+                    // Disable collideUp on just those tiles
+                    for (const tile of tilesToDrop) {
+                        tile.collideUp = false;
+                    }
+                    this.dropTiles = tilesToDrop;
+                    // Restore once moth's feet are past the tile's bottom edge
+                    this.dropRestoreY = (tilesToDrop[0].y + 1) * 16; // tile y is row index
+                    this.dropTimer = 500; // failsafe: force-restore after 500ms no matter what
+
+                    body.setVelocityY(20); // tiny nudge to start falling
+
+                    // Consume the jump so she doesn't also bounce upward
+                    this.jumpBufferTimer = 0;
+                    this.jumpWasDown = jumpHeld;
+                    return;
+                }
+            }
         }
 
         // ─── Execute jump ───

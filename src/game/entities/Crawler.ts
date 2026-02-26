@@ -70,6 +70,9 @@ export class Crawler extends Enemy {
     protected behave(_delta: number): void {
         const body = this.body as Phaser.Physics.Arcade.Body;
 
+        // Don't patrol while in hitstun — let the knockback play out!
+        if (this.isHitstunned) return;
+
         // ── Turn at walls ──
         if (body.blocked.left) {
             this.direction = 1;

@@ -5,6 +5,7 @@ import { getSolidTileIndices, TileIndex } from '../data/glyphs';
 import { Player } from '../entities/Player';
 import { Enemy, ENEMY_DEFAULTS } from '../entities/Enemy';
 import { Crawler } from '../entities/Crawler';
+import { DOOR_CONNECTIONS, DoorEdge, OPPOSITE_EDGE } from '../rooms/connections';
 
 /** Tile size in pixels */
 const TILE_SIZE = 16;
@@ -14,14 +15,23 @@ const TILE_SIZE = 16;
  */
 export class Game extends Phaser.Scene {
     private map!: Phaser.Tilemaps.Tilemap;
-    private layer!: Phaser.Tilemaps.TilemapLayer;
+    /** The tilemap layer — public so entities can query tiles (e.g. drop-through) */
+    public layer!: Phaser.Tilemaps.TilemapLayer;
     private player!: Player;
     /** All living enemies in the current room */
     private enemies: Enemy[] = [];
+    /** Door trigger zones in the current room */
+    private doorZones: Phaser.GameObjects.Zone[] = [];
+    /** Spike hazard zones in the current room */
+    private spikeZones: Phaser.GameObjects.Zone[] = [];
     /** Whether the scene is in hitstop (freeze frames on melee connect) */
     private hitstopTimer = 0;
     /** Current room ID (for respawn) */
     private currentRoomId: string = STARTING_ROOM;
+    /** True while a room transition is in progress (prevents re-triggering) */
+    private isTransitioning = false;
+    /** Which edge the player should spawn at (null = use S marker) */
+    private arrivalEdge: DoorEdge | null = null;
 
     constructor() {
         super('Game');
@@ -96,19 +106,52 @@ export class Game extends Phaser.Scene {
     /**
      * Tear down the current room and load a new one.
      */
-    private switchRoom(roomId: string): void {
+    private switchRoom(roomId: string, arrivalEdge: DoorEdge | null = null): void {
         // Clean up old room
         for (const enemy of this.enemies) {
             enemy.destroy();
         }
         this.enemies = [];
+        for (const zone of this.doorZones) {
+            zone.destroy();
+        }
+        this.doorZones = [];
+        for (const zone of this.spikeZones) {
+            zone.destroy();
+        }
+        this.spikeZones = [];
         this.player.meleeZone.destroy();
         this.player.slashGraphics.destroy();
         this.player.destroy();
         this.layer.destroy();
         this.map.destroy();
 
+        this.arrivalEdge = arrivalEdge;
         this.loadRoom(roomId);
+    }
+
+    /**
+     * Transition to another room via a door — fade out, switch, fade in.
+     */
+    private transitionToRoom(roomId: string, arrivalEdge: DoorEdge): void {
+        if (this.isTransitioning) return;
+        this.isTransitioning = true;
+
+        // Freeze player movement during transition
+        const body = this.player.body as Phaser.Physics.Arcade.Body;
+        body.setVelocity(0, 0);
+        body.setAcceleration(0, 0);
+        body.setAllowGravity(false);
+
+        // Fade out → switch → fade in
+        this.cameras.main.fadeOut(150, 0, 0, 0);
+        this.cameras.main.once('camerafadeoutcomplete', () => {
+            this.switchRoom(roomId, arrivalEdge);
+            this.cameras.main.fadeIn(150, 0, 0, 0);
+            this.cameras.main.once('camerafadeincomplete', () => {
+                this.isTransitioning = false;
+            });
+        });
     }
 
     /**
@@ -152,20 +195,69 @@ export class Game extends Phaser.Scene {
                 tile.collideDown = false;
                 tile.collideLeft = false;
                 tile.collideRight = false;
+
+                // Fix Phaser's "interesting faces" optimization:
+                // setCollision() marks the solid tile below as having a collision
+                // neighbor above, stripping its faceTop. That means drop-through
+                // would ghost through solid blocks below thin platforms. Force it back.
+                const below = this.layer.getTileAt(tile.x, tile.y + 1);
+                if (below && below.collides) {
+                    below.faceTop = true;
+                }
             }
         });
 
         // ─── Player spawn ───
-        const playerSpawn = spawns.find(s => s.glyph === 'S');
-        const spawnX = playerSpawn
-            ? playerSpawn.col * TILE_SIZE + TILE_SIZE / 2
-            : ROOM_WIDTH * TILE_SIZE / 2;
-        const spawnY = playerSpawn
-            ? playerSpawn.row * TILE_SIZE + TILE_SIZE / 2
-            : ROOM_HEIGHT * TILE_SIZE / 2;
+        // If arriving from a door, spawn at that edge's door positions.
+        // Otherwise fall back to the S marker.
+        const doorSpawns = spawns.filter(s => s.glyph === 'D');
+        let spawnX: number;
+        let spawnY: number;
 
+        if (this.arrivalEdge && doorSpawns.length > 0) {
+            // Find door tiles on the arrival edge
+            const edgeDoors = doorSpawns.filter(d => this.getDoorEdge(d.col, d.row) === this.arrivalEdge);
+            if (edgeDoors.length > 0) {
+                // Average position of door tiles on that edge (handles multi-tile doors)
+                const avgCol = edgeDoors.reduce((sum, d) => sum + d.col, 0) / edgeDoors.length;
+                const avgRow = edgeDoors.reduce((sum, d) => sum + d.row, 0) / edgeDoors.length;
+                spawnX = avgCol * TILE_SIZE + TILE_SIZE / 2;
+                spawnY = avgRow * TILE_SIZE + TILE_SIZE / 2;
+
+                // Nudge player inward so they don't immediately re-trigger the door
+                if (this.arrivalEdge === 'west')  spawnX += TILE_SIZE;
+                if (this.arrivalEdge === 'east')  spawnX -= TILE_SIZE;
+                if (this.arrivalEdge === 'north') spawnY += TILE_SIZE;
+                if (this.arrivalEdge === 'south') spawnY -= TILE_SIZE;
+            } else {
+                // Fallback to S marker
+                const s = spawns.find(s => s.glyph === 'S');
+                spawnX = s ? s.col * TILE_SIZE + TILE_SIZE / 2 : ROOM_WIDTH * TILE_SIZE / 2;
+                spawnY = s ? s.row * TILE_SIZE + TILE_SIZE / 2 : ROOM_HEIGHT * TILE_SIZE / 2;
+            }
+        } else {
+            const playerSpawn = spawns.find(s => s.glyph === 'S');
+            spawnX = playerSpawn
+                ? playerSpawn.col * TILE_SIZE + TILE_SIZE / 2
+                : ROOM_WIDTH * TILE_SIZE / 2;
+            spawnY = playerSpawn
+                ? playerSpawn.row * TILE_SIZE + TILE_SIZE / 2
+                : ROOM_HEIGHT * TILE_SIZE / 2;
+        }
         this.player = new Player(this, spawnX, spawnY);
         this.physics.add.collider(this.player, this.layer);
+
+        // ─── Entry momentum: carry velocity through door transitions ───
+        if (this.arrivalEdge) {
+            const body = this.player.body as Phaser.Physics.Arcade.Body;
+            switch (this.arrivalEdge) {
+                case 'south': body.setVelocityY(-280); break;  // came from below → jumping up
+                case 'north': body.setVelocityY(100); break;   // came from above → falling in
+                case 'west':  body.setVelocityX(130); break;   // came from left → walking right
+                case 'east':  body.setVelocityX(-130); break;  // came from right → walking left
+            }
+        }
+        this.arrivalEdge = null;
 
         // ─── Spawn enemies from E glyphs ───
         this.enemies = [];
@@ -199,6 +291,66 @@ export class Game extends Phaser.Scene {
                 () => this.onEnemyContactPlayer(enemy),
             );
         }
+
+        // ─── Spike hazard zones ───
+        this.spikeZones = [];
+        this.layer.forEachTile((tile) => {
+            if (tile.index === TileIndex.SPIKES) {
+                const zoneX = tile.pixelX + TILE_SIZE / 2;
+                const zoneY = tile.pixelY + TILE_SIZE / 2;
+                const zone = this.add.zone(zoneX, zoneY, TILE_SIZE, TILE_SIZE);
+                this.physics.add.existing(zone, true); // static body
+                // Shrink the spike hitbox a bit so it's forgiving (top half of tile)
+                const zoneBody = zone.body as Phaser.Physics.Arcade.StaticBody;
+                zoneBody.setSize(TILE_SIZE - 4, TILE_SIZE / 2);
+                zoneBody.setOffset(2, 0);
+                this.spikeZones.push(zone);
+
+                this.physics.add.overlap(this.player, zone, () => {
+                    this.player.takeDamage(1, this.player.x);
+                });
+            }
+        });
+
+        // ─── Door trigger zones ───
+        this.doorZones = [];
+        const connections = DOOR_CONNECTIONS[roomId] || [];
+        for (const conn of connections) {
+            // Find D tiles on the matching edge
+            const edgeDoors = doorSpawns.filter(d => this.getDoorEdge(d.col, d.row) === conn.fromEdge);
+            if (edgeDoors.length === 0) continue;
+
+            // Create a trigger zone covering all door tiles on this edge
+            const minCol = Math.min(...edgeDoors.map(d => d.col));
+            const maxCol = Math.max(...edgeDoors.map(d => d.col));
+            const minRow = Math.min(...edgeDoors.map(d => d.row));
+            const maxRow = Math.max(...edgeDoors.map(d => d.row));
+
+            const zoneX = (minCol + maxCol + 1) / 2 * TILE_SIZE;
+            const zoneY = (minRow + maxRow + 1) / 2 * TILE_SIZE;
+            const zoneW = (maxCol - minCol + 1) * TILE_SIZE;
+            const zoneH = (maxRow - minRow + 1) * TILE_SIZE;
+
+            const zone = this.add.zone(zoneX, zoneY, zoneW, zoneH);
+            this.physics.add.existing(zone, true); // static body
+            this.doorZones.push(zone);
+
+            // Overlap: player touches door → transition!
+            this.physics.add.overlap(this.player, zone, () => {
+                this.transitionToRoom(conn.targetRoom, conn.toEdge);
+            });
+        }
+    }
+
+    /**
+     * Determine which edge a door tile is on based on its grid position.
+     */
+    private getDoorEdge(col: number, row: number): DoorEdge | null {
+        if (row === 0) return 'north';
+        if (row === ROOM_HEIGHT - 1) return 'south';
+        if (col === 0) return 'west';
+        if (col === ROOM_WIDTH - 1) return 'east';
+        return null;
     }
 
     /**

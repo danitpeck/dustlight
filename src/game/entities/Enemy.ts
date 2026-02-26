@@ -5,8 +5,8 @@ import Phaser from 'phaser';
  * Individual enemy types can override via their own constants.
  */
 export const ENEMY_DEFAULTS = {
-    KNOCKBACK_VEL:   200,   // px/s — impulse on hit
-    KNOCKBACK_UP:   -100,   // py/s — slight upward pop on hit
+    KNOCKBACK_VEL:   350,   // px/s — impulse on hit (enough to slash twice)
+    KNOCKBACK_UP:   -120,   // py/s — slight upward pop on hit
     FLASH_DURATION:  100,   // ms — white flash on damage
     HITSTOP_MS:       50,   // ms — freeze frames on melee connect (juice!)
     INVULN_MS:       300,   // ms — post-hit invulnerability
@@ -38,6 +38,8 @@ export abstract class Enemy extends Phaser.Physics.Arcade.Sprite {
     private _alive = true;
 
     get alive(): boolean { return this._alive; }
+    /** True while in post-hit invuln (knockback should play out, AI paused) */
+    get isHitstunned(): boolean { return this.invulnTimer > 0; }
 
     constructor(
         scene: Phaser.Scene,

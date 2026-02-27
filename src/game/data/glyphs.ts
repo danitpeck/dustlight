@@ -21,7 +21,7 @@ export const TileIndex = {
      */
     SOLID:          -99,
     THIN_PLATFORM:  63,    // Pass-through platform from below (placeholder — tune later)
-    CRACKED_FLOOR:  3,    // Ground Pound breakable (placeholder)
+    CRACKED_FLOOR:  70,   // X block — Ground Pound breakable (row 4, col 11 — 1-based)
     PHASE_WALL:     4,    // Phase Shift passable (placeholder)
     SPIKES:         122,  // Spike hazard (row 6, col 2)
     DOOR:           56,  // Door / room transition marker (placeholder)

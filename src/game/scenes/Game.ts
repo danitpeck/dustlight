@@ -6,6 +6,7 @@ import { Player } from '../entities/Player';
 import { Enemy, ENEMY_DEFAULTS } from '../entities/Enemy';
 import { Crawler } from '../entities/Crawler';
 import { DOOR_CONNECTIONS, DoorEdge, OPPOSITE_EDGE } from '../rooms/connections';
+import { EditorOverlay } from '../editor/EditorOverlay';
 
 /** Tile size in pixels */
 const TILE_SIZE = 16;
@@ -36,12 +37,39 @@ export class Game extends Phaser.Scene {
     private arrivalEdge: DoorEdge | null = null;
     /** Player feet Y at end of last frame — for manual platform landing */
     private prevPlayerFeetY = 0;
+    /** In-game debug tile editor */
+    private editor!: EditorOverlay;
+    /** Graphics used for iris wipe mask */
+    private irisGraphics!: Phaser.GameObjects.Graphics;
+    /** Geometry mask for the iris wipe */
+    private irisMask!: Phaser.Display.Masks.GeometryMask;
+    /** Current iris radius (tweened) */
+    private irisRadius = 0;
+    /** Center of the iris wipe */
+    private irisX = 0;
+    private irisY = 0;
+    /** Max radius needed to cover the full screen */
+    private readonly IRIS_MAX = 200; // sqrt(320² + 240²) / 2 ≈ 200
 
     constructor() {
         super('Game');
     }
 
     create(): void {
+        // Disable right-click context menu (editor uses right-click to erase)
+        this.game.canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+
+        // ── Iris wipe mask setup ──
+        // Graphics is used only as a mask shape — remove from display list so it's not drawn
+        this.irisGraphics = this.make.graphics({});
+        this.irisMask = new Phaser.Display.Masks.GeometryMask(this, this.irisGraphics);
+        this.irisRadius = this.IRIS_MAX;
+
+        // Create the debug editor (must exist before loadRoom so it can receive room data)
+        this.editor = new EditorOverlay(this, (ascii) => {
+            this.switchRoom(this.currentRoomId, null, ascii);
+        });
+
         this.loadRoom(STARTING_ROOM);
         this.setupDebugKeys();
 
@@ -54,6 +82,19 @@ export class Game extends Phaser.Scene {
     }
 
     update(time: number, delta: number): void {
+        // ── Editor mode: skip gameplay, let editor handle everything ──
+        if (this.editor.isActive) {
+            this.editor.update();
+            return;
+        }
+
+        // ── Redraw iris mask every frame while transitioning ──
+        if (this.isTransitioning) {
+            this.irisGraphics.clear();
+            this.irisGraphics.fillStyle(0xffffff);
+            this.irisGraphics.fillCircle(this.irisX, this.irisY, this.irisRadius);
+        }
+
         // ── Hitstop: freeze everything for a few frames on melee connect ──
         if (this.hitstopTimer > 0) {
             this.hitstopTimer -= delta;
@@ -144,10 +185,17 @@ export class Game extends Phaser.Scene {
             );
             const roomId = roomIds[i];
             key.on('down', () => {
+                if (this.editor.isActive) return; // editor uses number keys for palette
                 console.log(`[DEBUG] Switching to room: ${roomId}`);
                 this.switchRoom(roomId);
             });
         }
+
+        // F1 — toggle debug tile editor
+        const editorKey = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.F1);
+        editorKey.on('down', () => {
+            this.editor.toggle();
+        });
 
         // Backtick (`) — toggle physics debug draw
         const debugKey = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.BACKTICK);
@@ -169,7 +217,7 @@ export class Game extends Phaser.Scene {
     /**
      * Tear down the current room and load a new one.
      */
-    private switchRoom(roomId: string, arrivalEdge: DoorEdge | null = null): void {
+    private switchRoom(roomId: string, arrivalEdge: DoorEdge | null = null, overrideAscii?: string): void {
         // Clean up old room
         for (const enemy of this.enemies) {
             enemy.destroy();
@@ -195,11 +243,11 @@ export class Game extends Phaser.Scene {
         this.map.destroy();
 
         this.arrivalEdge = arrivalEdge;
-        this.loadRoom(roomId);
+        this.loadRoom(roomId, overrideAscii);
     }
 
     /**
-     * Transition to another room via a door — fade out, switch, fade in.
+     * Transition to another room via a door — iris close, switch, iris open.
      */
     private transitionToRoom(roomId: string, arrivalEdge: DoorEdge): void {
         if (this.isTransitioning) return;
@@ -211,14 +259,38 @@ export class Game extends Phaser.Scene {
         body.setAcceleration(0, 0);
         body.setAllowGravity(false);
 
-        // Fade out → switch → fade in
-        this.cameras.main.fadeOut(150, 0, 0, 0);
-        this.cameras.main.once('camerafadeoutcomplete', () => {
-            this.switchRoom(roomId, arrivalEdge);
-            this.cameras.main.fadeIn(150, 0, 0, 0);
-            this.cameras.main.once('camerafadeincomplete', () => {
-                this.isTransitioning = false;
-            });
+        // Center the iris on the moth
+        this.irisX = this.player.x;
+        this.irisY = this.player.y;
+
+        // Apply mask to the camera
+        this.cameras.main.setMask(this.irisMask);
+
+        // Iris close → switch room → iris open
+        this.tweens.add({
+            targets: this,
+            irisRadius: 0,
+            duration: 180,
+            ease: 'Sine.easeIn',
+            onComplete: () => {
+                this.switchRoom(roomId, arrivalEdge);
+
+                // Re-center iris on new player position
+                this.irisX = this.player.x;
+                this.irisY = this.player.y;
+
+                // Iris open
+                this.tweens.add({
+                    targets: this,
+                    irisRadius: this.IRIS_MAX,
+                    duration: 200,
+                    ease: 'Sine.easeOut',
+                    onComplete: () => {
+                        this.cameras.main.clearMask();
+                        this.isTransitioning = false;
+                    },
+                });
+            },
         });
     }
 
@@ -226,9 +298,9 @@ export class Game extends Phaser.Scene {
      * Parse an ASCII room and render it as a Phaser tilemap,
      * then spawn the player at the S marker.
      */
-    private loadRoom(roomId: string): void {
+    private loadRoom(roomId: string, overrideAscii?: string): void {
         this.currentRoomId = roomId;
-        const ascii = ROOMS[roomId];
+        const ascii = overrideAscii ?? ROOMS[roomId];
         if (!ascii) {
             throw new Error(`Room '${roomId}' not found in registry`);
         }
@@ -255,6 +327,9 @@ export class Game extends Phaser.Scene {
 
         // Collision on solid tiles (terrain set pieces + cracked floor + phase wall)
         this.map.setCollision(getSolidTileIndices());
+
+        // Pass room data to the editor
+        this.editor?.loadRoom(roomId, ascii, this.map);
 
         // Thin platform tiles are VISUAL ONLY — no tile collision.
         // Physics is handled by separate static bodies below.

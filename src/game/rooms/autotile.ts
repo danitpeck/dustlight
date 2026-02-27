@@ -93,28 +93,32 @@ export function pickAutotile(
  * @param tiles          - The 2D tile index array (mutated in place)
  * @param autoTileIndex  - The placeholder tile index that should be autotiled (e.g., the SOLID index)
  * @param set            - The TerrainSet to use
+ * @param alsoSolid      - Additional tile indices that count as "solid neighbor" (e.g., cracked floors blend with walls)
  * @returns The mutated tiles array
  */
 export function applyAutotile(
     tiles: number[][],
     autoTileIndex: number,
     set: TerrainSet,
+    alsoSolid: number[] = [],
 ): number[][] {
     const height = tiles.length;
     const width = tiles[0]?.length ?? 0;
+
+    const solidSet = new Set([autoTileIndex, ...alsoSolid]);
 
     const isSolid = (row: number, col: number): boolean => {
         // Out-of-bounds = solid → outermost wall tiles become center (blank),
         // inner wall tiles become proper left/right edge pieces facing the room.
         if (row < 0 || row >= height || col < 0 || col >= width) return true;
-        return tiles[row][col] === autoTileIndex;
+        return solidSet.has(tiles[row][col]);
     };
 
     // We need to read the original grid while writing, so snapshot first
     const snapshot = tiles.map(row => [...row]);
     const isSolidOriginal = (row: number, col: number): boolean => {
         if (row < 0 || row >= height || col < 0 || col >= width) return true;
-        return snapshot[row][col] === autoTileIndex;
+        return solidSet.has(snapshot[row][col]);
     };
 
     for (let row = 0; row < height; row++) {

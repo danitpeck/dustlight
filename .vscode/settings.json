@@ -26,6 +26,7 @@
         "Add-Type": true,
         "Push-Location": true,
         "npx tsx": true,
-        "npx --yes tsx": true
+        "npx --yes tsx": true,
+        "npx vite": true
     }
 }

@@ -1,6 +1,8 @@
 import Phaser from 'phaser';
 import { MOVE, ATTACK, PLAYER_HP, WALL } from '../data/constants';
 import { WallClingState, createWallClingState, updateWallCling } from '../systems/wallCling';
+import { JumpState, createJumpState, updateJump } from '../systems/jump';
+import { AttackState, createAttackState, updateAttack, HPState, createHPState, applyDamage, tickHP } from '../systems/combat';
 
 // Re-export so existing imports from Player still work
 export { MOVE, ATTACK, PLAYER_HP };
@@ -33,52 +35,43 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
     /** Whether the left mouse button was pressed this frame (edge-detect) */
     private mouseAttackJustPressed = false;
 
-    /** Current hit points */
-    private _hp: number = PLAYER_HP.MAX;
-    /** ms remaining of post-hit invulnerability */
-    private invulnTimer = 0;
-    /** Used for blink effect during invuln */
-    private blinkTimer = 0;
-    /** Whether the moth is dead (awaiting respawn) */
-    private _dead = false;
+    /** HP / invuln / blink state (pure state machine) */
+    private hpState: HPState = createHPState();
     /** True while the moth is dropping through a thin platform */
     private _droppingThrough = false;
     /** Failsafe timer: auto-clear dropping flag after this many ms */
     private dropTimer = 0;
     /** Wall cling & wall jump state (pure state machine) */
     private wallClingState: WallClingState = createWallClingState();
+    /** Jump state (pure state machine) */
+    private jumpState: JumpState = createJumpState();
 
-    /** ms remaining in the coyote-time window */
-    private coyoteTimer = 0;
-    /** ms remaining in the jump-buffer window */
-    private jumpBufferTimer = 0;
-    /** true while ascending from a jump (for variable height cut) */
-    private isJumping = false;
-    /** edge-detection: was jump held last frame? */
-    private jumpWasDown = false;
+    /** Attack state (pure state machine) */
+    private attackState: AttackState = createAttackState();
 
     /** The melee attack hitbox zone — invisible, used for overlap checks */
     private attackHitbox!: Phaser.GameObjects.Zone;
-    /** ms remaining while the attack hitbox is active */
-    private attackTimer = 0;
-    /** ms remaining before the next attack is allowed */
-    private attackCooldown = 0;
-    /** Whether an attack is currently active (hitbox is live) */
-    private _isAttacking = false;
     /** Slash sprite visual */
     private slashSprite!: Phaser.GameObjects.Sprite;
+    /** Dust particle emitter (land + jump puffs) */
+    private dustEmitter!: Phaser.GameObjects.Particles.ParticleEmitter;
+
+    /** Was the moth airborne last frame? (for landing detection) */
+    private wasAirborne = false;
+    /** Cooldown to prevent landing squash from re-triggering on physics micro-bounce */
+    private landSquashCooldown = 0;
 
     /** Public read-only: is the moth currently mid-swing? */
-    get isAttacking(): boolean { return this._isAttacking; }
+    get isAttacking(): boolean { return this.attackState.isAttacking; }
 
     /** Public read-only: current HP */
-    get hp(): number { return this._hp; }
+    get hp(): number { return this.hpState.hp; }
 
     /** Public read-only: is the moth dead? */
-    get dead(): boolean { return this._dead; }
+    get dead(): boolean { return this.hpState.dead; }
 
     /** Public read-only: is the moth in invuln frames? */
-    get invulnerable(): boolean { return this.invulnTimer > 0; }
+    get invulnerable(): boolean { return this.hpState.invulnTimer > 0; }
 
     /** Public read-only: is the moth currently dropping through a thin platform? */
     get droppingThrough(): boolean { return this._droppingThrough; }
@@ -91,6 +84,9 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
 
     /** The slash arc graphics — for cleanup on room switch */
     get slashGraphics(): Phaser.GameObjects.Sprite { return this.slashSprite; }
+
+    /** The dust particle emitter — for cleanup on room switch */
+    get dustParticles(): Phaser.GameObjects.Particles.ParticleEmitter { return this.dustEmitter; }
 
     constructor(scene: Phaser.Scene, x: number, y: number) {
         super(scene, x, y, 'tiles', MOTH_IDLE);
@@ -150,29 +146,40 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
         this.slashSprite = scene.add.sprite(x, y, 'slash-vfx');
         this.slashSprite.setVisible(false);
         this.slashSprite.setDepth(10); // render above everything
+
+        // ─── Dust particle emitter (land + jump puffs) ───
+        // Generate a tiny 2×2 white pixel texture if not already cached
+        if (!scene.textures.exists('dust-pixel')) {
+            const g = scene.add.graphics();
+            g.fillStyle(0xffffff);
+            g.fillRect(0, 0, 2, 2);
+            g.generateTexture('dust-pixel', 2, 2);
+            g.destroy();
+        }
+        this.dustEmitter = scene.add.particles(0, 0, 'dust-pixel', {
+            speed: { min: 15, max: 40 },
+            angle: { min: 220, max: 320 }, // spray downward-ish (fans out from feet)
+            lifespan: { min: 150, max: 300 },
+            scale: { start: 1, end: 0 },
+            alpha: { start: 1, end: 0 },
+            gravityY: 80,
+            emitting: false,  // manual bursts only
+        });
+        this.dustEmitter.setDepth(5);
     }
 
     /**
      * Per-frame update — call from `Scene.update(time, delta)`.
      */
     tick(_time: number, delta: number): void {
-        if (this._dead) return;
+        if (this.hpState.dead) return;
 
         const body = this.body as Phaser.Physics.Arcade.Body;
         const onGround = body.blocked.down;
 
-        // ─── Invulnerability blink ───
-        if (this.invulnTimer > 0) {
-            this.invulnTimer -= delta;
-            this.blinkTimer -= delta;
-            if (this.blinkTimer <= 0) {
-                this.setAlpha(this.alpha === 1 ? 0.3 : 1);
-                this.blinkTimer = PLAYER_HP.BLINK_MS;
-            }
-            if (this.invulnTimer <= 0) {
-                this.setAlpha(1);
-            }
-        }
+        // ─── HP / invuln blink (pure system) ───
+        this.hpState = tickHP(this.hpState, delta);
+        this.setAlpha(this.hpState.visible ? 1 : 0.3);
 
         // ─── Horizontal movement (arrows + WASD) ───
         const left = this.cursors.left.isDown || this.wasd.A.isDown;
@@ -219,24 +226,27 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
             this.setFrame(MOTH_IDLE);
         }
 
-        // ─── Coyote time ───
-        if (onGround) {
-            this.coyoteTimer = MOVE.COYOTE_MS;
-            this.isJumping = false;
-        } else {
-            this.coyoteTimer -= delta;
+        // ─── Land juice: squash + dust puff ───
+        this.landSquashCooldown = Math.max(0, this.landSquashCooldown - delta);
+        if (onGround && this.wasAirborne && this.landSquashCooldown <= 0 && !this.attackState.isAttacking) {
+            this.landSquashCooldown = 200; // ms before squash can re-trigger
+            this.scene.tweens.killTweensOf(this);
+            this.setScale(1, 1);
+            this.scene.tweens.add({
+                targets: this,
+                scaleX: 1.3,
+                scaleY: 0.7,
+                duration: 60,
+                ease: 'Power2',
+                yoyo: true,
+                onComplete: () => this.setScale(1, 1),
+            });
+            this.dustEmitter.emitParticleAt(this.x, this.y + 7, 4);
         }
 
-        // ─── Jump buffer ───
+        // ─── Jump input ───
         const jumpHeld = this.cursors.up.isDown || this.jumpKey.isDown || this.wasd.W.isDown;
-        const jumpJustPressed = jumpHeld && !this.jumpWasDown;
-
-        if (jumpJustPressed) {
-            this.jumpBufferTimer = MOVE.BUFFER_MS;
-        } else {
-            this.jumpBufferTimer -= delta;
-        }
-
+        const jumpJustPressed = jumpHeld && !this.jumpState.jumpWasDown;
         const downHeld = this.cursors.down.isDown || this.wasd.S.isDown;
 
         // ─── Drop-through: clear flag once moth lands or timer expires ───
@@ -258,26 +268,38 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
             body.setVelocityY(20); // tiny nudge
 
             // Consume the jump so she doesn't also bounce upward
-            this.jumpBufferTimer = 0;
-            this.jumpWasDown = jumpHeld;
+            this.jumpState = { ...this.jumpState, jumpBufferTimer: 0, jumpWasDown: jumpHeld };
             return;
         }
 
-        // ─── Execute jump ───
-        if (this.coyoteTimer > 0 && this.jumpBufferTimer > 0) {
-            body.setVelocityY(MOVE.JUMP_VEL);
-            this.isJumping = true;
-            this.coyoteTimer = 0;
-            this.jumpBufferTimer = 0;
-        }
+        // ─── Jump (pure system) ───
+        const jumpResult = updateJump(this.jumpState, {
+            onGround,
+            jumpHeld,
+            velocityY: body.velocity.y,
+            delta,
+        });
+        this.jumpState = jumpResult.state;
 
-        // ─── Variable jump height (cut on early release) ───
-        if (this.isJumping && !jumpHeld && body.velocity.y < 0) {
-            body.velocity.y *= MOVE.JUMP_CUT;
-            this.isJumping = false;
-        }
+        if (jumpResult.newVelocityY !== null) {
+            body.setVelocityY(jumpResult.newVelocityY);
 
-        this.jumpWasDown = jumpHeld;
+            // Jump stretch + dust puff (only when actually launching, not on cut)
+            if (jumpResult.newVelocityY < 0) {
+                this.scene.tweens.killTweensOf(this);
+                this.setScale(1, 1);
+                this.scene.tweens.add({
+                    targets: this,
+                    scaleX: 0.75,
+                    scaleY: 1.3,
+                    duration: 80,
+                    ease: 'Power2',
+                    yoyo: true,
+                    onComplete: () => this.setScale(1, 1),
+                });
+                this.dustEmitter.emitParticleAt(this.x, this.y + 7, 3);
+            }
+        }
 
         // ─── Wall cling & wall jump ───
         const wallResult = updateWallCling(this.wallClingState, {
@@ -296,11 +318,22 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
             // Wall jump: apply velocity and cancel normal jump state
             body.setVelocityY(wallResult.newVelocityY!);
             body.setVelocityX(wallResult.newVelocityX!);
-            this.isJumping = true; // allow variable height cut
-            this.coyoteTimer = 0;
-            this.jumpBufferTimer = 0;
+            this.jumpState = { ...this.jumpState, isJumping: true, coyoteTimer: 0, jumpBufferTimer: 0 };
             // Face away from wall
             this.setFlipX(wallResult.newVelocityX! < 0);
+            // Wall jump stretch + dust
+            this.scene.tweens.killTweensOf(this);
+            this.setScale(1, 1);
+            this.scene.tweens.add({
+                targets: this,
+                scaleX: 0.75,
+                scaleY: 1.3,
+                duration: 80,
+                ease: 'Power2',
+                yoyo: true,
+                onComplete: () => this.setScale(1, 1),
+            });
+            this.dustEmitter.emitParticleAt(this.x, this.y, 3);
         } else {
             if (wallResult.newVelocityY !== null) {
                 body.setVelocityY(wallResult.newVelocityY);
@@ -310,31 +343,32 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
             }
         }
 
-        // ─── Melee attack ───
-        this.attackCooldown -= delta;
-
+        // ─── Melee attack (pure system) ───
         const attackRequested = this.attackKey?.isDown || this.mouseAttackJustPressed;
         this.mouseAttackJustPressed = false; // consume the click
 
-        if (attackRequested && this.attackCooldown <= 0 && !this._isAttacking) {
-            this.startAttack();
+        const attackResult = updateAttack(this.attackState, {
+            attackRequested: !!attackRequested,
+            delta,
+        });
+        this.attackState = attackResult.state;
+
+        if (attackResult.startedAttack) {
+            this.onAttackStart();
+        }
+        if (attackResult.endedAttack) {
+            this.onAttackEnd();
+        }
+        if (this.attackState.isAttacking) {
+            this.positionAttackHitbox();
         }
 
-        if (this._isAttacking) {
-            this.attackTimer -= delta;
-            this.positionAttackHitbox();
-            if (this.attackTimer <= 0) {
-                this.endAttack();
-            }
-        }
+        // ─── Track airborne state for next frame's landing detection ───
+        this.wasAirborne = !onGround;
     }
 
-    /** Activate the attack hitbox. */
-    private startAttack(): void {
-        this._isAttacking = true;
-        this.attackTimer = ATTACK.DURATION_MS;
-        this.attackCooldown = ATTACK.COOLDOWN_MS;
-
+    /** VFX callback: attack just started — enable hitbox & draw slash. */
+    private onAttackStart(): void {
         const hitBody = this.attackHitbox.body as Phaser.Physics.Arcade.Body;
         hitBody.enable = true;
         hitBody.debugShowBody = true;
@@ -345,6 +379,8 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
 
         // ── Moth lunge: squash toward attack direction ──
         const dir = this.flipX ? -1 : 1;
+        this.scene.tweens.killTweensOf(this);
+        this.setScale(1, 1);
         this.scene.tweens.add({
             targets: this,
             scaleX: 1.3,
@@ -353,12 +389,12 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
             duration: ATTACK.DURATION_MS * 0.4,
             ease: 'Power2',
             yoyo: true,
+            onComplete: () => this.setScale(1, 1),
         });
     }
 
-    /** Deactivate the attack hitbox. */
-    private endAttack(): void {
-        this._isAttacking = false;
+    /** VFX callback: attack just ended — disable hitbox. */
+    private onAttackEnd(): void {
         const hitBody = this.attackHitbox.body as Phaser.Physics.Arcade.Body;
         hitBody.enable = false;
         hitBody.debugShowBody = false;
@@ -410,11 +446,10 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
      * Returns true if the hit connected (false if invuln or dead).
      */
     takeDamage(amount: number, sourceX: number): boolean {
-        if (this._dead || this.invulnTimer > 0) return false;
+        const result = applyDamage(this.hpState, { amount });
+        if (!result.hit) return false;
 
-        this._hp -= amount;
-        this.invulnTimer = PLAYER_HP.INVULN_MS;
-        this.blinkTimer = PLAYER_HP.BLINK_MS;
+        this.hpState = result.state;
 
         // ── Knockback: away from damage source ──
         const dir = this.x < sourceX ? -1 : 1;
@@ -428,7 +463,7 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
         this.scene.cameras.main.flash(100, 255, 255, 255, false, undefined, 0.3);
 
         // ── Death check ──
-        if (this._hp <= 0) {
+        if (result.died) {
             this.die();
         }
 
@@ -437,7 +472,7 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
 
     /** The moth is dead — stop everything, play death effect. */
     private die(): void {
-        this._dead = true;
+        // hpState.dead is already true from applyDamage
         this.setAlpha(1);
         const body = this.body as Phaser.Physics.Arcade.Body;
         body.setAcceleration(0, 0);

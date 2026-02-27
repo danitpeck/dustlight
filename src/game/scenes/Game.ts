@@ -189,6 +189,7 @@ export class Game extends Phaser.Scene {
         }
         this.player.meleeZone.destroy();
         this.player.slashGraphics.destroy();
+        this.player.dustParticles.destroy();
         this.player.destroy();
         this.layer.destroy();
         this.map.destroy();

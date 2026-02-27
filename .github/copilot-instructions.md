@@ -37,18 +37,25 @@ src/
     config.ts                   # Phaser game config (320×240, pixelArt, FIT scaling)
     scenes/
       Boot.ts                   # Asset preloading
-      Game.ts                   # Main gameplay scene
+      Game.ts                   # Main gameplay scene (room loading, collision, transitions)
     rooms/
       parser.ts                 # ASCII → tile array (pure function, no Phaser)
+      autotile.ts               # 3×3 bitmask autotiling (pure function)
       index.ts                  # Room registry (ID → ASCII string)
       definitions/              # One .ts file per room (e.g., H1.ts, C1.ts)
     data/
       glyphs.ts                 # Glyph → tile index mapping table
+      constants.ts              # Phaser-free tuning constants (MOVE, ATTACK, WALL, etc.)
     entities/                   # Player, enemies, pickups
-      Player.ts                 # Moth — arcade physics, run/jump/coyote/buffer
+      Player.ts                 # Moth — movement, attack, wall cling, all abilities
+      Enemy.ts                  # Base enemy class (HP, knockback, hitstun)
+      Crawler.ts                # Patrol enemy — walks back and forth
+    systems/                    # Pure state machines (no Phaser dependency)
+      jump.ts                   # Coyote time, jump buffering, variable height
+      combat.ts                 # Attack cooldown, HP, invuln, damage resolution
+      wallCling.ts              # Wall cling, wall slide, wall jump, grace period
     editor/                     # In-game debug editor (coming soon)
-    systems/                    # Physics helpers, input, camera (coming soon)
-  __tests__/                    # Unit tests for pure logic
+  __tests__/                    # Unit tests for pure logic (66 tests)
 public/
   assets/tiles/                 # Kenney tileset PNG + license
 planning/                       # Design docs (DESIGN.md, DECISIONS.md, MAP.md)
@@ -80,11 +87,18 @@ Rooms are defined as 20×15 ASCII strings. The parser (`src/game/rooms/parser.ts
 - Single-screen — no scrolling within a room
 - Transitions between rooms via doors at screen edges
 
+### Pure Systems Pattern
+Game logic lives in `systems/` as **pure state machines** — no Phaser imports, just `(state, input) → (state, outputs)`. This makes them trivially testable and keeps Player.ts as thin "glue" that feeds Phaser data in and applies results out. Currently: `jump.ts`, `combat.ts`, `wallCling.ts`.
+
+### Thin Platform Collision
+Thin platforms (`~`) use **manual collision** in Game.ts, NOT Phaser's built-in `collide()`. The `resolvePlayerPlatforms()` method detects when the player's feet cross a platform top edge, then snaps position and sets `blocked.down`. This bypasses a Phaser Arcade Physics jitter bug. Drop-through is a boolean flag on Player checked by the resolver.
+
 ### Testing Strategy
 - Keep game logic **Phaser-free** wherever possible — the parser, glyph mappings, entity state machines, and room data are all pure functions/data
 - Test those with plain Vitest (no DOM needed)
 - Don't instantiate `Phaser.Game` in tests — jsdom doesn't have real Canvas/WebGL
 - If you need to test something that touches Phaser, mock at the boundary
+- Currently 66 tests across 5 files (parser, autotile, jump, combat, wallCling)
 
 ### Code Style
 - TypeScript strict mode

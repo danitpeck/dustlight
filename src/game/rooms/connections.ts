@@ -55,5 +55,7 @@ function connect(
 }
 
 // ─── The Clearing (Hub) connections ───
-connect('H1', 'east',  'H3', 'west');   // H1 right → H3 left
-connect('H2', 'south', 'H1', 'north');  // H2 bottom → H1 top (need to add doors to H1 top!)
+connect('H1', 'west',  'H3', 'east');   // H1 left → H3 right (West Path)
+connect('H1', 'north', 'H2', 'south');  // H1 top → H2 bottom (Canopy)
+connect('H1', 'east',  'H4', 'west');   // H1 right → H4 left (East Path)
+connect('H1', 'south', 'H5', 'north');  // H1 bottom → H5 top (Below)

@@ -116,3 +116,54 @@ Discovered through playtesting H1–H3 with actual jump physics:
 - **H1 is the welcome mat, not the obstacle course.** Keep starter rooms flat and safe. Tricky platforming belongs in rooms 2+.
 - **Geometry teaches direction.** Stepping ledges toward a door naturally guide the player without words — very on-brand for wordless narrative.
 - **Doors are invisible.** Player walks into void and transitions. No visible door tile — the D glyph maps to -1 (air).
+
+## Autotiling System (Feb 25, 2026)
+Rather than hand-picking tile indices for every wall piece, we built a 3×3 bitmask autotiler. Each `#` glyph checks its 8 neighbors and picks the correct Kenney tile from a terrain set (top-left corner, vertical edge, inner corner, etc.). This means rooms only need `#` for walls — the visual variety comes automatically. All autotile logic (`autotile.ts`) is pure functions, fully tested.
+
+## Thin Platform Saga (Feb 25, 2026)
+This was a multi-day journey that ended up finding a *Phaser engine bug.*
+
+### The Problem
+Thin platforms (`~` glyph) vibrated. The moth would stand on them and jitter 1px up and down every frame. We tried **9+ different approaches** including:
+- setCollision with face flags
+- process callbacks
+- checkCollision.down toggling
+- pre/post-update hooks
+- invisible sprite bodies
+- Zone collision with checkCollision flags
+
+### The Solution (Two Parts)
+1. **Manual platform collision** — completely bypass Phaser's `collide()` for thin platforms. We detect platform crossing in `update()` by comparing `prevPlayerFeetY` to current position, then snap and set `blocked.down` ourselves. This eliminated the platform-specific vibration.
+2. **Sub-pixel position snap** — even with manual platforms, there was STILL jitter on regular `#` wall tiles. Root cause: Phaser's `ProcessTileSeparationX/Y` does `body.position -= overlap` which leaves fractional results (63.9997 instead of 64). Added `Math.round(body.position.y)` when `blocked.down` as a workaround in our Game.ts.
+
+### Phaser Upstream PR
+We actually found and fixed the engine bug! Submitted PR to `phaserjs/phaser` from Dani's fork (`danitpeck/phaser`), branch `fix/arcade-tile-separation-subpixel`. The fix: after tile separation subtraction, snap to nearest integer only when within 0.01 epsilon (preserves intentionally fractional positions from scaled sprites). JSBin repro included. Status: awaiting review.
+
+This was Dani's first open source contribution! 🦋
+
+## Pure Systems Architecture (Feb 25, 2026)
+Adopted a pattern of extracting game logic into **pure, Phaser-free state machines** that can be tested with plain Vitest:
+
+- `systems/combat.ts` — attack cooldown, HP tracking, invulnerability, damage resolution. 15 tests.
+- `systems/jump.ts` — coyote time, jump buffering, variable jump height. 11 tests.
+- `systems/wallCling.ts` — cling detection, wall slide, wall jump, grace period, input lock. 16 tests.
+
+Each system takes a state + input, returns a new state + outputs. No Phaser types anywhere. Player.ts is the "glue" that feeds Phaser data into these systems and applies the outputs.
+
+**Current gap:** `wallCling.ts` is wired into Player.ts. `combat.ts` and `jump.ts` are extracted and tested but Player.ts still runs inline versions of that logic. Wiring them in is a pending task.
+
+## Combat & Enemies (Feb 25, 2026)
+- Melee attack: short-range hitbox, brief attack duration, cooldown.
+- Spike damage: overlap with spike tiles → damage + knockback + invulnerability frames.
+- Enemy base class (`Enemy.ts`) with HP, hitstun, knockback. `Crawler.ts` as first enemy type — patrols back and forth, pauses during hitstun.
+- Enemy-to-player contact damage with knockback.
+
+## Wall Cling (Feb 25, 2026)
+First unlockable ability, implemented as a pure state machine:
+- **Cling:** Airborne + touching wall + holding toward wall = cling. Slow slide down (40 vel vs normal gravity).
+- **Wall jump:** Jump while clinging → launch away from wall (160 X vel, -260 Y vel). Brief input lock (150ms) prevents immediately re-clinging.
+- **Grace period:** 80ms after releasing the wall, can still wall jump.
+- Worked first try in-game — "WOW this feels good." Current visual: jump frame flipped to face the wall.
+
+## Drop-Through (Feb 25, 2026)
+Down + jump on a thin platform = drop through. Implementation: boolean `_droppingThrough` flag on Player + 500ms failsafe timer. Game.ts's manual platform resolver skips collision when the flag is set. Clean and simple after the thin platform rewrite.

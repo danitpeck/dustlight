@@ -182,10 +182,32 @@ The editor is a first-class tool, not an afterthought. It starts as an in-game d
 - Editor and game share the same tile renderer — no divergence.
 
 ## What's Next
-1. Download & integrate Kenney 1-bit tileset.
-2. Prototype: player movement (run + jump) with a single test room.
-3. **In-game debug editor (Phase 1)** — get tile painting + ASCII export working early.
-4. Implement melee attack.
-5. Build hub + one zone with first ability pickup (Wall Cling).
-6. Iterate feel: squash/stretch, particles, screen shake.
-7. Evolve editor toward Phase 2 as room count grows.
+Progress as of Feb 26, 2026:
+
+### Done
+1. ~~Download & integrate Kenney 1-bit tileset~~
+2. ~~Player movement (run + jump) with coyote time, jump buffering, variable height~~
+3. ~~Implement melee attack~~ (attack hitbox, cooldown, hitstun, knockback)
+4. ~~Wall Cling ability~~ (pure state machine, wired into Player)
+5. ~~Autotiling system~~ (3×3 bitmask, pure functions, 13 tests)
+6. ~~Rooms H1-H3~~ (with transitions, enemies, spikes, thin platforms)
+7. ~~Thin platform system~~ (manual collision, drop-through)
+8. ~~Spike damage + enemy contact damage~~
+9. ~~Enemy system~~ (Enemy base + Crawler, knockback/hitstun)
+10. ~~Pure systems extraction~~ (combat.ts, jump.ts, wallCling.ts — 42 tests)
+11. ~~Phaser sub-pixel jitter bugfix~~ (PR submitted upstream)
+
+### Up Next (Roughly Ordered)
+1. **Finish The Clearing** — H4 (East Path) and H5 (Below) to complete the hub zone.
+2. **Wire pure systems** — Replace inline jump/combat logic in Player.ts with calls to jump.ts and combat.ts state machines. Wall Cling is already wired.
+3. **Build The Roots (C1-C6)** — First real zone. Vertical focus, tight corridors. Wall Cling pickup room + The Clinger boss.
+4. **Room transitions polish** — Fade/iris wipe, spawn at correct door side.
+5. **Juice pass** — Squash/stretch on land/jump, dust particles, hitstop on melee connect, screen shake on damage. All code-driven.
+6. **In-game debug editor (Phase 1)** — Tile painting + ASCII export. Will massively speed up room building for the remaining 4 zones.
+7. **Dash ability** — Second unlock, found in The Works. Flutter burst movement.
+8. **Build The Works (F1-F7)** — Horizontal zone, conveyor hazards, requires Wall Cling.
+9. **Double Jump, Ground Pound, Phase Shift** — Remaining abilities, each with zone.
+10. **Boss encounters** — Emotion gates: The Clinger, The Current, The Updraft, The Weight, The Flicker.
+11. **Save system** — Checkpoints, serialize abilities/progress.
+12. **Map screen** — Room names visible, hidden message in critical-path order.
+13. **Hidden narrative layer** — Silhouette flicker on Phase Shift, domestic wrongness tiles, moth wing collectibles.

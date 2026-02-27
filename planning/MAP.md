@@ -77,18 +77,41 @@ Each ability reveals secrets in previously visited zones — AND reveals hidden-
 ## The Clearing Layout (5 rooms)
 
 ```
-       [H2: Canopy]
+       [H2: Canopy] ✅
             |
-[H3: West Path]--[H1: The Clearing]--[H4: East Path]
-                       |
-                  [H5: Below]
+[H3: West Path] ✅ --[H1: The Clearing] ✅ --[H4: East Path] 🔲
+                            |
+                       [H5: Below] 🔲
 ```
 
-- H1: The Clearing — Spawn point. The moth arrives. Doors to all cardinal directions. Surface: a ruin entrance. Hidden: a front door.
-- H2: Canopy — leads to The Updraft (Dash-gated gap). Surface: crumbling tower base. Hidden: stairs to the attic.
-- H3: West Path — leads to The Roots. Surface: cave mouth. Hidden: basement stairs.
-- H4: East Path — leads to The Works. Surface: metal doorway. Hidden: kitchen door.
-- H5: Below — leads to The Still (Wall Cling + Double Jump gate). Contains cracked floor secret. Surface: deep shaft. Hidden: the hallway to the bedroom.
+✅ = built & playable, 🔲 = designed but not yet built
+
+- H1: The Clearing — Spawn point. The moth arrives. Doors to all cardinal directions. Surface: a ruin entrance. Hidden: a front door. **BUILT** — central platforms, zigzag ascent, exits N/W/E.
+- H2: Canopy — leads to The Updraft (Dash-gated gap). Surface: crumbling tower base. Hidden: stairs to the attic. **BUILT** — vertical platforming room, tall climb.
+- H3: West Path — leads to The Roots. Surface: cave mouth. Hidden: basement stairs. **BUILT** — tighter room, spikes hazard, Crawler enemy, exit W to C1.
+- H4: East Path — leads to The Works. Surface: metal doorway. Hidden: kitchen door. **TODO**
+- H5: Below — leads to The Still (Wall Cling + Double Jump gate). Contains cracked floor secret. Surface: deep shaft. Hidden: the hallway to the bedroom. **TODO**
+
+## The Roots Layout (6 rooms) — ALL TODO
+
+```
+[C2: Narrow Shaft]
+       |
+[C1: Cave Mouth]--[C3: Fungal Ledge]
+       |                  |
+[C4: Damp Floor]   [C5: The Clinger's Den]
+       |
+[C6: Wall Cling Shrine]
+```
+
+- C1: Cave Mouth — Entry from H3. Transition from hub architecture to organic caves. Tight but not hostile.
+- C2: Narrow Shaft — Vertical climb. Teaches upward navigation before Wall Cling is acquired. Thin platforms, zigzag ascent.
+- C3: Fungal Ledge — Horizontal with tricky gaps. First real platforming test in this zone.
+- C4: Damp Floor — Hazard room. Spikes, crawlers, tighter geometry. Tests current moveset mastery.
+- C5: The Clinger's Den — **BOSS ROOM.** The Clinger (Fear) guards the path forward. Spider-thing blocking the shaft.
+- C6: Wall Cling Shrine — **ABILITY PICKUP.** After defeating The Clinger, reach the Wall Cling pickup. Then backtrack through the zone using the new ability to find shortcuts.
+
+*Hidden layer notes: kitchen tiles appear subtly in C3. A garden pattern edge in C2. The basement reveals itself.*
 
 ## Room Naming Convention
 `{Zone Letter}{Number}` — e.g., `C1` = Roots room 1, `F3` = Works room 3.

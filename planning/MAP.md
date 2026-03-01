@@ -79,39 +79,39 @@ Each ability reveals secrets in previously visited zones — AND reveals hidden-
 ```
        [H2: Canopy] ✅
             |
-[H3: West Path] ✅ --[H1: The Clearing] ✅ --[H4: East Path] 🔲
+[H3: West Path] ✅ --[H1: The Clearing] ✅ --[H4: East Path] ✅
                             |
-                       [H5: Below] 🔲
+                       [H5: Below] ✅
 ```
 
 ✅ = built & playable, 🔲 = designed but not yet built
 
-- H1: The Clearing — Spawn point. The moth arrives. Doors to all cardinal directions. Surface: a ruin entrance. Hidden: a front door. **BUILT** — central platforms, zigzag ascent, exits N/W/E.
+- H1: The Clearing — Spawn point. The moth arrives. Doors to all cardinal directions. Surface: a ruin entrance. Hidden: a front door. **BUILT** — central platforms, zigzag ascent, exits N/W/E/S. Contains ability pickup (`*`).
 - H2: Canopy — leads to The Updraft (Dash-gated gap). Surface: crumbling tower base. Hidden: stairs to the attic. **BUILT** — vertical platforming room, tall climb.
 - H3: West Path — leads to The Roots. Surface: cave mouth. Hidden: basement stairs. **BUILT** — tighter room, spikes hazard, Crawler enemy, exit W to C1.
-- H4: East Path — leads to The Works. Surface: metal doorway. Hidden: kitchen door. **TODO**
-- H5: Below — leads to The Still (Wall Cling + Double Jump gate). Contains cracked floor secret. Surface: deep shaft. Hidden: the hallway to the bedroom. **TODO**
+- H4: East Path — leads to The Works. Surface: metal doorway. Hidden: kitchen door. **BUILT** — horizontal room, wider gaps, thin platforms, Crawler enemy. Exit E to F1 (not yet connected).
+- H5: Below — leads to The Still (Wall Cling + Double Jump gate). Contains cracked floor (`=`) secret. Surface: deep shaft. Hidden: the hallway to the bedroom. **BUILT** — vertical descent, spiral platforms, spikes at bottom, Crawler enemy.
 
-## The Roots Layout (6 rooms) — ALL TODO
+## The Roots Layout (6 rooms)
 
 ```
-[C2: Narrow Shaft]
+       [C2: Narrow Shaft] ✅
+              |
+[C3: Fungal Ledge] ✅ --[C1: Cave Mouth] ✅
        |
-[C1: Cave Mouth]--[C3: Fungal Ledge]
-       |                  |
-[C4: Damp Floor]   [C5: The Clinger's Den]
-       |
-[C6: Wall Cling Shrine]
+[C5: The Clinger's Den] ✅    [C4: Damp Floor] ✅
+       |                              ↑
+[C6: Wall Cling Shrine] ✅     (dead end from C1)
 ```
 
-- C1: Cave Mouth — Entry from H3. Transition from hub architecture to organic caves. Tight but not hostile.
-- C2: Narrow Shaft — Vertical climb. Teaches upward navigation before Wall Cling is acquired. Thin platforms, zigzag ascent.
-- C3: Fungal Ledge — Horizontal with tricky gaps. First real platforming test in this zone.
-- C4: Damp Floor — Hazard room. Spikes, crawlers, tighter geometry. Tests current moveset mastery.
-- C5: The Clinger's Den — **BOSS ROOM.** The Clinger (Fear) guards the path forward. Spider-thing blocking the shaft.
-- C6: Wall Cling Shrine — **ABILITY PICKUP.** After defeating The Clinger, reach the Wall Cling pickup. Then backtrack through the zone using the new ability to find shortcuts.
+✅ = built & playable
 
-*Hidden layer notes: kitchen tiles appear subtly in C3. A garden pattern edge in C2. The basement reveals itself.*
+- C1: Cave Mouth — Entry from H3. Transition from hub architecture to organic caves. Tight but not hostile. **BUILT** — 4 exits (N→C2, W→C3, E→H3, S→C4), one Crawler, thin platforms.
+- C2: Narrow Shaft — Vertical climb. Dead-end side room. Thin platforms zigzag up the shaft. Secret item (?) at top teases Wall Cling backtrack. **BUILT** — one Crawler, spikes at bottom.
+- C3: Fungal Ledge — Horizontal with tricky gaps. First real platforming test in this zone. **BUILT** — two Crawlers, exits E→C1 and S→C5.
+- C4: Damp Floor — Hazard gauntlet. Dead-end side room. Spikes and Crawlers in tighter spaces. Secret item behind spike passage. **BUILT** — two Crawlers, spikes.
+- C5: The Clinger's Den — **BOSS ROOM.** Open arena. The Clinger (Fear) guards the path forward. **BUILT** — boss arena with thin platforms at different heights, exits N→C3 and S→C6.
+- C6: Wall Cling Shrine — **ABILITY PICKUP.** Quiet alcove. Walk in, claim Wall Cling. High platforms tease backtrack usage. **BUILT** — ability pickup (`*`), decorative platforms.
 
 ## Room Naming Convention
 `{Zone Letter}{Number}` — e.g., `C1` = Roots room 1, `F3` = Works room 3.

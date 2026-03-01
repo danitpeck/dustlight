@@ -59,3 +59,11 @@ connect('H1', 'west',  'H3', 'east');   // H1 left → H3 right (West Path)
 connect('H1', 'north', 'H2', 'south');  // H1 top → H2 bottom (Canopy)
 connect('H1', 'east',  'H4', 'west');   // H1 right → H4 left (East Path)
 connect('H1', 'south', 'H5', 'north');  // H1 bottom → H5 top (Below)
+
+// ─── The Roots connections ───
+connect('H3', 'west',  'C1', 'east');   // H3 left → C1 right (Cave Mouth)
+connect('C1', 'north', 'C2', 'south');  // C1 top → C2 bottom (Narrow Shaft — dead end)
+connect('C1', 'west',  'C3', 'east');   // C1 left → C3 right (Fungal Ledge)
+connect('C1', 'south', 'C4', 'north');  // C1 bottom → C4 top (Damp Floor — dead end)
+connect('C3', 'south', 'C5', 'north');  // C3 bottom → C5 top (Clinger's Den — boss)
+connect('C5', 'south', 'C6', 'north');  // C5 bottom → C6 top (Wall Cling Shrine — reward)

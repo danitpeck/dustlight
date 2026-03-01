@@ -150,7 +150,7 @@ Adopted a pattern of extracting game logic into **pure, Phaser-free state machin
 
 Each system takes a state + input, returns a new state + outputs. No Phaser types anywhere. Player.ts is the "glue" that feeds Phaser data into these systems and applies the outputs.
 
-**Current gap:** `wallCling.ts` is wired into Player.ts. `combat.ts` and `jump.ts` are extracted and tested but Player.ts still runs inline versions of that logic. Wiring them in is a pending task.
+**Status:** All pure systems are now wired into Player.ts — combat, jump, wallCling, dash, groundPound, phaseShift, and abilities. 97 tests across 9 test files, all passing.
 
 ## Combat & Enemies (Feb 25, 2026)
 - Melee attack: short-range hitbox, brief attack duration, cooldown.
@@ -167,3 +167,34 @@ First unlockable ability, implemented as a pure state machine:
 
 ## Drop-Through (Feb 25, 2026)
 Down + jump on a thin platform = drop through. Implementation: boolean `_droppingThrough` flag on Player + 500ms failsafe timer. Game.ts's manual platform resolver skips collision when the flag is set. Clean and simple after the thin platform rewrite.
+
+## Ability System (Feb 27-28, 2026)
+Full ability unlock system implemented. All 5 abilities are coded, tested, and wired into Player.ts:
+
+### Pure State Machines Added
+- **`systems/abilities.ts`** — Ability registry. Tracks unlocked abilities as a Set. Maps rooms to specific ability pickups via `ROOM_ABILITY_MAP`. Fallback order via `getNextLockedAbility()`. 6 tests.
+- **`systems/dash.ts`** — Flutter burst. Horizontal speed override (480 px/s for 160ms), gravity suppressed, holds altitude. Ghostly alpha flash + trailing dust particles during dash. 8 tests.
+- **`systems/groundPound.ts`** — Dive-bomb. Phases: idle → windup (80ms freeze) → falling (450 px/s) → impact (80ms freeze). AOE damage (2 HP, 32×16 px zone). Breaks cracked floors (`=`). 9 tests.
+- **`systems/phaseShift.ts`** — Becoming dust. 400ms incorporeality, 800ms cooldown. Toggles collision on `%` phase wall tiles. 8 tests.
+- **`systems/jump.ts`** — Extended with `airJumpsRemaining` for double jump. Second jump impulse slightly weaker (-260 vs -285).
+
+### Player.ts Integration
+- Full ability priority system in `tick()`: (1) Ground Pound overrides → (2) Dash overrides → (3) Normal movement. Phase Shift is orthogonal (collision only).
+- Invulnerability during dash, ground pound (falling + impact), and phase shift — no self-damage from offensive abilities.
+- VFX methods: `onDashStart/End()`, `onPoundStart/Impact()`, `onPhaseStart/End()`, `onJumpLaunch(wasAirJump)`, `onWallJump()`.
+- Input: Shift = dash, K = phase, Down + airborne = ground pound. Edge detection via wasDown tracking.
+
+### Game.ts Integration
+- Pickup system: `*` tiles create overlap zones. On contact: determine ability from `ROOM_ABILITY_MAP` or fallback, unlock, remove tile+zone, play juice.
+- Pickup juice: flash + hitstop + camera zoom tween (yoyo) + particle burst + floating ability name text.
+- Phase wall toggling: `phase-start` → disable collision on `%` tiles, `phase-end` → re-enable + eject moth if stuck inside.
+- Cracked floor breaking: 3-wide check below moth on ground-pound-impact, removes `=` tiles with particle burst.
+- Ground pound AOE: damages enemies in 32×16 px zone below moth for 2 HP.
+- Debug keys: F2 = unlock all abilities, F3 = unlock next ability in sequence.
+
+### Bugs Found & Fixed
+- **Camera zoom stuck on pickup:** Phaser's `zoomTo()` silently rejects when already zooming. Replaced with a plain tween + yoyo.
+- **Wrong ability feedback:** Pickups gave no indication of WHICH ability was granted. Added floating text label.
+- **Ground pound self-damage:** Contact damage overlap fired during pound. Added invuln check for falling + impact phases.
+- **Phase wall ejection:** Moth fell through all terrain if phase ended while inside a `%` wall. Added `ejectFromPhaseWalls()` — searches 4 directions for nearest non-solid tile and teleports with dust poof.
+- **Dash felt anemic:** Buffed from 350px/s × 120ms (~42px) to 480px/s × 160ms (~77px). Added trailing dust and ghostly alpha.

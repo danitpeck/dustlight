@@ -182,7 +182,7 @@ The editor is a first-class tool, not an afterthought. It starts as an in-game d
 - Editor and game share the same tile renderer — no divergence.
 
 ## What's Next
-Progress as of Feb 26, 2026:
+Progress as of Feb 28, 2026:
 
 ### Done
 1. ~~Download & integrate Kenney 1-bit tileset~~
@@ -190,24 +190,31 @@ Progress as of Feb 26, 2026:
 3. ~~Implement melee attack~~ (attack hitbox, cooldown, hitstun, knockback)
 4. ~~Wall Cling ability~~ (pure state machine, wired into Player)
 5. ~~Autotiling system~~ (3×3 bitmask, pure functions, 13 tests)
-6. ~~Rooms H1-H3~~ (with transitions, enemies, spikes, thin platforms)
+6. ~~Rooms H1-H5~~ — Full hub zone built with transitions, enemies, spikes, thin platforms, cracked floor, pickup
 7. ~~Thin platform system~~ (manual collision, drop-through)
 8. ~~Spike damage + enemy contact damage~~
 9. ~~Enemy system~~ (Enemy base + Crawler, knockback/hitstun)
 10. ~~Pure systems extraction~~ (combat.ts, jump.ts, wallCling.ts — 42 tests)
 11. ~~Phaser sub-pixel jitter bugfix~~ (PR submitted upstream)
+12. ~~Juice pass~~ — Squash/stretch on land/jump, dust particles, hitstop on melee connect, screen shake on damage, ability pickup VFX
+13. ~~Room transitions~~ — Iris wipe, spawn at correct door side, arrivalEdge system
+14. ~~In-game debug editor (Phase 1)~~ — F1 toggle, tile painting, glyph palette, ASCII export/import
+15. ~~All 5 abilities implemented~~ — Dash, Double Jump, Ground Pound, Phase Shift + ability registry + pickup system (97 tests total)
+16. ~~Wire all pure systems~~ — All state machines wired into Player.ts: jump, combat, wallCling, dash, groundPound, phaseShift
+17. ~~Ground pound AOE damage~~ — Damages enemies below moth on impact
+18. ~~Phase wall ejection~~ — Safety teleport when phase ends inside a wall
 
 ### Up Next (Roughly Ordered)
-1. **Finish The Clearing** — H4 (East Path) and H5 (Below) to complete the hub zone.
-2. **Wire pure systems** — Replace inline jump/combat logic in Player.ts with calls to jump.ts and combat.ts state machines. Wall Cling is already wired.
-3. **Build The Roots (C1-C6)** — First real zone. Vertical focus, tight corridors. Wall Cling pickup room + The Clinger boss.
-4. **Room transitions polish** — Fade/iris wipe, spawn at correct door side.
-5. **Juice pass** — Squash/stretch on land/jump, dust particles, hitstop on melee connect, screen shake on damage. All code-driven.
-6. **In-game debug editor (Phase 1)** — Tile painting + ASCII export. Will massively speed up room building for the remaining 4 zones.
-7. **Dash ability** — Second unlock, found in The Works. Flutter burst movement.
-8. **Build The Works (F1-F7)** — Horizontal zone, conveyor hazards, requires Wall Cling.
-9. **Double Jump, Ground Pound, Phase Shift** — Remaining abilities, each with zone.
-10. **Boss encounters** — Emotion gates: The Clinger, The Current, The Updraft, The Weight, The Flicker.
-11. **Save system** — Checkpoints, serialize abilities/progress.
-12. **Map screen** — Room names visible, hidden message in critical-path order.
-13. **Hidden narrative layer** — Silhouette flicker on Phase Shift, domestic wrongness tiles, moth wing collectibles.
+1. **Build The Roots (C1-C6)** — First real zone. Vertical focus, tight corridors. Wall Cling pickup room + The Clinger boss.
+2. **The Clinger boss** — First boss fight. Fear incarnate. Guards Wall Cling.
+3. **Build The Works (F1-F7)** — Horizontal zone, mechanical hazards. Dash pickup. Requires Wall Cling.
+4. **The Current boss** — Momentum. Mechanical beast on a conveyor.
+5. **Build The Updraft (S1-S6)** — Open, airy, tall rooms. Double Jump pickup. Requires Dash.
+6. **Build The Still (D1-D8)** — Dense late-game zone. Ground Pound + Phase Shift pickups.
+7. **Remaining bosses** — The Updraft, The Weight, The Flicker (mirror moth).
+8. **Save system** — Checkpoints, serialize abilities/progress, death respawn.
+9. **Map screen** — Room names visible, hidden message in critical-path order.
+10. **Hidden narrative layer** — Silhouette flicker on Phase Shift, domestic wrongness tiles, moth wing collectibles.
+11. **Phase 2 editor** — Standalone browser editor with room list, door linking, undo/redo.
+12. **Audio** — SFX and music. Code-driven, minimal but atmospheric.
+13. **Polish** — Palette swaps per zone, post-processing effects, title screen.

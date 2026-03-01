@@ -5,6 +5,7 @@ import { getSolidTileIndices, TileIndex } from '../data/glyphs';
 import { Player } from '../entities/Player';
 import { Enemy, ENEMY_DEFAULTS } from '../entities/Enemy';
 import { Crawler } from '../entities/Crawler';
+import { Clinger } from '../entities/Clinger';
 import { DOOR_CONNECTIONS, DoorEdge, OPPOSITE_EDGE } from '../rooms/connections';
 import { EditorOverlay } from '../editor/EditorOverlay';
 import { AbilityState, AbilityId, createAbilityState, unlockAbility, hasAbility, ROOM_ABILITY_MAP, unlockAll } from '../systems/abilities';
@@ -47,6 +48,10 @@ export class Game extends Phaser.Scene {
     private pickupZones: Phaser.GameObjects.Zone[] = [];
     /** Phase wall tile indices (to toggle collision during Phase Shift) */
     private phaseWallTiles: Phaser.Tilemaps.Tile[] = [];
+    /** Set of defeated boss IDs — persists across room transitions */
+    private defeatedBosses: Set<string> = new Set();
+    /** The active boss in the current room (if any) */
+    private activeBoss: Clinger | null = null;
     /** Graphics used for iris wipe mask */
     private irisGraphics!: Phaser.GameObjects.Graphics;
     /** Geometry mask for the iris wipe */
@@ -98,6 +103,7 @@ export class Game extends Phaser.Scene {
             for (const tile of this.phaseWallTiles) {
                 tile.setCollision(true);
             }
+            this.ejectFromPhaseWalls();
         });
 
         // ── Ground Pound: break cracked floors + AOE damage ──
@@ -106,6 +112,14 @@ export class Game extends Phaser.Scene {
             this.groundPoundDamageEnemies(x, y);
             // Hitstop on impact for extra juice
             this.hitstopTimer = GROUND_POUND.IMPACT_FREEZE_MS;
+        });
+
+        // ── Boss defeated: open locked doors, track globally ──
+        this.events.on('boss-defeated', (bossId: string) => {
+            this.defeatedBosses.add(bossId);
+            this.activeBoss = null;
+            // Freeze for a beat to let the death animation breathe
+            this.hitstopTimer = 200;
         });
     }
 
@@ -272,6 +286,7 @@ export class Game extends Phaser.Scene {
             enemy.destroy();
         }
         this.enemies = [];
+        this.activeBoss = null;
         for (const zone of this.doorZones) {
             zone.destroy();
         }
@@ -463,8 +478,9 @@ export class Game extends Phaser.Scene {
         }
         this.arrivalEdge = null;
 
-        // ─── Spawn enemies from E glyphs ───
+        // ─── Spawn enemies from E glyphs + bosses from B glyphs ───
         this.enemies = [];
+        this.activeBoss = null;
         for (const spawn of spawns) {
             const worldX = spawn.col * TILE_SIZE + TILE_SIZE / 2;
             const worldY = spawn.row * TILE_SIZE + TILE_SIZE / 2;
@@ -477,6 +493,15 @@ export class Game extends Phaser.Scene {
                     this.physics.add.collider(crawler, this.platformBodies);
                 }
                 this.enemies.push(crawler);
+            } else if (spawn.glyph === 'B') {
+                // Boss spawn — only if not already defeated
+                const bossId = this.getBossIdForRoom(roomId);
+                if (bossId && !this.defeatedBosses.has(bossId)) {
+                    const boss = new Clinger(this, worldX, worldY, this.layer);
+                    boss.setPlayer(this.player);
+                    this.enemies.push(boss);
+                    this.activeBoss = boss;
+                }
             } else if (spawn.glyph !== 'S') {
                 console.log(`[${roomId}] ${spawn.glyph} spawn at tile (${spawn.col}, ${spawn.row}) → world (${worldX}, ${worldY})`);
             }
@@ -586,6 +611,17 @@ export class Game extends Phaser.Scene {
         if (col === 0) return 'west';
         if (col === ROOM_WIDTH - 1) return 'east';
         return null;
+    }
+
+    /**
+     * Map room IDs to boss IDs. Returns null if the room has no boss.
+     */
+    private getBossIdForRoom(roomId: string): string | null {
+        const ROOM_BOSS_MAP: Record<string, string> = {
+            'C5': 'clinger',
+            // Future: 'F?': 'current', 'S?': 'updraft', etc.
+        };
+        return ROOM_BOSS_MAP[roomId] ?? null;
     }
 
     /**
@@ -775,6 +811,73 @@ export class Game extends Phaser.Scene {
                 if (hit) {
                     this.cameras.main.shake(80, 0.008);
                 }
+            }
+        }
+    }
+
+    /**
+     * If the moth is stuck inside a phase wall when phase shift ends,
+     * eject her to the nearest non-solid tile so she doesn't clip
+     * through the world.
+     */
+    private ejectFromPhaseWalls(): void {
+        const body = this.player.body as Phaser.Physics.Arcade.Body;
+        const centerX = body.center.x;
+        const centerY = body.center.y;
+
+        // Which tile is the moth's center in?
+        const col = Math.floor(centerX / TILE_SIZE);
+        const row = Math.floor(centerY / TILE_SIZE);
+
+        const tile = this.layer.getTileAt(col, row);
+        if (!tile || tile.index !== TileIndex.PHASE_WALL) return; // not stuck
+
+        // Search outward in 4 directions for the nearest non-solid tile.
+        // Prefer horizontal ejection (left/right) over vertical so the
+        // moth lands somewhere natural instead of teleporting up/down.
+        const directions: [number, number][] = [
+            [-1,  0], // left
+            [ 1,  0], // right
+            [ 0, -1], // up
+            [ 0,  1], // down
+        ];
+
+        let bestDist = Infinity;
+        let bestCol = col;
+        let bestRow = row;
+
+        for (const [dx, dy] of directions) {
+            for (let dist = 1; dist <= Math.max(ROOM_WIDTH, ROOM_HEIGHT); dist++) {
+                const testCol = col + dx * dist;
+                const testRow = row + dy * dist;
+
+                // Out of bounds — stop searching this direction
+                if (testCol < 0 || testCol >= ROOM_WIDTH ||
+                    testRow < 0 || testRow >= ROOM_HEIGHT) break;
+
+                const testTile = this.layer.getTileAt(testCol, testRow);
+                const isSolid = testTile && testTile.collideUp;
+
+                if (!isSolid) {
+                    if (dist < bestDist) {
+                        bestDist = dist;
+                        bestCol = testCol;
+                        bestRow = testRow;
+                    }
+                    break; // found nearest clear tile in this direction
+                }
+            }
+        }
+
+        if (bestDist < Infinity) {
+            const newX = bestCol * TILE_SIZE + TILE_SIZE / 2;
+            const newY = bestRow * TILE_SIZE + TILE_SIZE / 2;
+            this.player.setPosition(newX, newY);
+            body.reset(newX, newY);
+
+            // Little dust poof to sell the ejection
+            if (this.player.dustParticles) {
+                this.player.dustParticles.emitParticleAt(newX, newY, 4);
             }
         }
     }

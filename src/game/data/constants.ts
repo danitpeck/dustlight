@@ -46,9 +46,9 @@ export const WALL = {
 
 /** Dash tuning — flutter burst. */
 export const DASH = {
-    SPEED:        350,   // px/s — horizontal burst velocity
-    DURATION_MS:  120,   // ms the dash lasts
-    COOLDOWN_MS:  400,   // ms before next dash
+    SPEED:        480,   // px/s — horizontal burst velocity
+    DURATION_MS:  160,   // ms the dash lasts
+    COOLDOWN_MS:  350,   // ms before next dash
 } as const;
 
 /** Double jump tuning. */

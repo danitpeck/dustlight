@@ -62,6 +62,8 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
 
     /** Edge-detection: was dash held last frame? */
     private dashWasDown = false;
+    /** Timed event for spawning dust trail during dash */
+    private dashTrailTimer: Phaser.Time.TimerEvent | null = null;
     /** Edge-detection: was phase key held last frame? */
     private phaseWasDown = false;
 
@@ -522,20 +524,36 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
         this.setScale(1, 1);
         this.scene.tweens.add({
             targets: this,
-            scaleX: 1.4,
-            scaleY: 0.7,
-            duration: DASH.DURATION_MS * 0.5,
-            ease: 'Power2',
+            scaleX: 1.5,
+            scaleY: 0.6,
+            duration: DASH.DURATION_MS * 0.4,
+            ease: 'Cubic.easeOut',
             yoyo: true,
             onComplete: () => this.setScale(1, 1),
         });
-        // Burst of dust at dash origin
-        this.dustEmitter.emitParticleAt(this.x, this.y + 4, 5);
+        // Big burst of dust at dash origin
+        this.dustEmitter.emitParticleAt(this.x, this.y + 4, 8);
+        // Ghostly alpha flash — moth becomes a streak
+        this.setAlpha(0.6);
+        // Start trailing dust every few frames during dash
+        this.dashTrailTimer = this.scene.time.addEvent({
+            delay: 30,
+            repeat: Math.floor(DASH.DURATION_MS / 30) - 1,
+            callback: () => {
+                this.dustEmitter.emitParticleAt(this.x, this.y + 2, 2);
+            },
+        });
     }
 
-    /** Dash ended — settle back. */
+    /** Dash ended — settle back + restore alpha. */
     private onDashEnd(): void {
-        // Nothing special needed — scale tween handles return
+        this.setAlpha(1);
+        if (this.dashTrailTimer) {
+            this.dashTrailTimer.destroy();
+            this.dashTrailTimer = null;
+        }
+        // Pop a little dust at landing spot
+        this.dustEmitter.emitParticleAt(this.x, this.y + 4, 4);
     }
 
     /** Ground pound started (windup) — brief hang, slight scale pulse. */
@@ -662,9 +680,10 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
      * Returns true if the hit connected (false if invuln or dead).
      */
     takeDamage(amount: number, sourceX: number): boolean {
-        // Phase shift and dash grant invulnerability
+        // Phase shift, dash, and ground pound grant invulnerability
         if (this.phaseShiftState.isPhased) return false;
         if (this.dashState.isDashing) return false;
+        if (this.groundPoundState.phase === 'falling' || this.groundPoundState.phase === 'impact') return false;
 
         const result = applyDamage(this.hpState, { amount });
         if (!result.hit) return false;

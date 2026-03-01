@@ -7,6 +7,8 @@ import { Enemy, ENEMY_DEFAULTS } from '../entities/Enemy';
 import { Crawler } from '../entities/Crawler';
 import { DOOR_CONNECTIONS, DoorEdge, OPPOSITE_EDGE } from '../rooms/connections';
 import { EditorOverlay } from '../editor/EditorOverlay';
+import { AbilityState, AbilityId, createAbilityState, unlockAbility, hasAbility, ROOM_ABILITY_MAP, unlockAll } from '../systems/abilities';
+import { GROUND_POUND } from '../data/constants';
 
 /** Tile size in pixels */
 const TILE_SIZE = 16;
@@ -39,6 +41,12 @@ export class Game extends Phaser.Scene {
     private prevPlayerFeetY = 0;
     /** In-game debug tile editor */
     private editor!: EditorOverlay;
+    /** Ability unlock state — persists across room transitions */
+    private abilityState: AbilityState = createAbilityState();
+    /** Ability pickup zones in the current room */
+    private pickupZones: Phaser.GameObjects.Zone[] = [];
+    /** Phase wall tile indices (to toggle collision during Phase Shift) */
+    private phaseWallTiles: Phaser.Tilemaps.Tile[] = [];
     /** Graphics used for iris wipe mask */
     private irisGraphics!: Phaser.GameObjects.Graphics;
     /** Geometry mask for the iris wipe */
@@ -78,6 +86,26 @@ export class Game extends Phaser.Scene {
             this.time.delayedCall(600, () => {
                 this.switchRoom(this.currentRoomId);
             });
+        });
+
+        // ── Phase Shift: toggle phase wall collision ──
+        this.events.on('phase-start', () => {
+            for (const tile of this.phaseWallTiles) {
+                tile.setCollision(false);
+            }
+        });
+        this.events.on('phase-end', () => {
+            for (const tile of this.phaseWallTiles) {
+                tile.setCollision(true);
+            }
+        });
+
+        // ── Ground Pound: break cracked floors + AOE damage ──
+        this.events.on('ground-pound-impact', (x: number, y: number) => {
+            this.breakCrackedFloors(x, y);
+            this.groundPoundDamageEnemies(x, y);
+            // Hitstop on impact for extra juice
+            this.hitstopTimer = GROUND_POUND.IMPACT_FREEZE_MS;
         });
     }
 
@@ -212,6 +240,27 @@ export class Game extends Phaser.Scene {
             }
             console.log(`[DEBUG] Physics debug: ${world.drawDebug ? 'ON' : 'OFF'}`);
         });
+
+        // F2 — unlock all abilities (debug)
+        const unlockAllKey = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.F2);
+        unlockAllKey.on('down', () => {
+            this.abilityState = unlockAll();
+            this.player.abilities = this.abilityState;
+            console.log('[DEBUG] All abilities unlocked!');
+        });
+
+        // F3 — unlock next ability in sequence (debug)
+        const unlockNextKey = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.F3);
+        unlockNextKey.on('down', () => {
+            const next = this.getNextLockedAbility();
+            if (next) {
+                this.abilityState = unlockAbility(this.abilityState, next);
+                this.player.abilities = this.abilityState;
+                console.log(`[DEBUG] Unlocked: ${next}`);
+            } else {
+                console.log('[DEBUG] All abilities already unlocked');
+            }
+        });
     }
 
     /**
@@ -231,6 +280,11 @@ export class Game extends Phaser.Scene {
             zone.destroy();
         }
         this.spikeZones = [];
+        for (const zone of this.pickupZones) {
+            zone.destroy();
+        }
+        this.pickupZones = [];
+        this.phaseWallTiles = [];
         if (this.platformBodies) {
             this.platformBodies.destroy(true);
             this.platformBodies = null;
@@ -373,6 +427,7 @@ export class Game extends Phaser.Scene {
                 : ROOM_HEIGHT * TILE_SIZE / 2;
         }
         this.player = new Player(this, spawnX, spawnY);
+        this.player.abilities = this.abilityState;
         this.physics.add.collider(this.player, this.layer);
 
         // ─── Thin platform zones (for manual landing + enemy collision) ───
@@ -493,6 +548,33 @@ export class Game extends Phaser.Scene {
                 this.transitionToRoom(conn.targetRoom, conn.toEdge);
             });
         }
+
+        // ─── Ability pickup zones ───
+        // Scan tilemap for ABILITY_PICKUP tiles and create overlap triggers.
+        // Which ability a pickup grants is determined by ROOM_ABILITY_MAP,
+        // or defaults to a debug "next ability" if the room isn't mapped.
+        this.pickupZones = [];
+        this.layer.forEachTile((tile) => {
+            if (tile.index === TileIndex.ABILITY_PICKUP) {
+                const zoneX = tile.pixelX + TILE_SIZE / 2;
+                const zoneY = tile.pixelY + TILE_SIZE / 2;
+                const zone = this.add.zone(zoneX, zoneY, TILE_SIZE, TILE_SIZE);
+                this.physics.add.existing(zone, true);
+                this.pickupZones.push(zone);
+
+                this.physics.add.overlap(this.player, zone, () => {
+                    this.onAbilityPickup(tile, zone);
+                });
+            }
+        });
+
+        // ─── Phase wall tile references (for Phase Shift collision toggling) ───
+        this.phaseWallTiles = [];
+        this.layer.forEachTile((tile) => {
+            if (tile.index === TileIndex.PHASE_WALL) {
+                this.phaseWallTiles.push(tile);
+            }
+        });
     }
 
     /**
@@ -530,5 +612,170 @@ export class Game extends Phaser.Scene {
     private onEnemyContactPlayer(enemy: Enemy): void {
         if (!enemy.alive) return;
         this.player.takeDamage(enemy.contactDamage, enemy.x);
+    }
+
+    // ═══════════════════════════════════════════════════════
+    // ─── Ability Pickup System ────────────────────────────
+    // ═══════════════════════════════════════════════════════
+
+    /**
+     * Called when the player overlaps an ability pickup tile (*).
+     * Determines which ability to grant, unlocks it, plays VFX,
+     * and removes the tile from the world.
+     */
+    private onAbilityPickup(tile: Phaser.Tilemaps.Tile, zone: Phaser.GameObjects.Zone): void {
+        // Determine which ability this pickup grants
+        const abilityId = ROOM_ABILITY_MAP[this.currentRoomId] ?? this.getNextLockedAbility();
+        if (!abilityId) return; // all abilities already unlocked
+
+        // Already have this one? Skip
+        if (hasAbility(this.abilityState, abilityId)) return;
+
+        // ── Unlock the ability ──
+        this.abilityState = unlockAbility(this.abilityState, abilityId);
+        this.player.abilities = this.abilityState;
+        console.log(`[ABILITY] Unlocked: ${abilityId}!`);
+
+        // ── Remove the tile + zone ──
+        this.layer.removeTileAt(tile.x, tile.y);
+        zone.destroy();
+        this.pickupZones = this.pickupZones.filter(z => z !== zone);
+
+        // ── Pickup VFX! ──
+        this.pickupJuice(tile.pixelX + TILE_SIZE / 2, tile.pixelY + TILE_SIZE / 2, abilityId);
+    }
+
+    /**
+     * Get the next ability in acquisition order that hasn't been unlocked yet.
+     * Used as a fallback when ROOM_ABILITY_MAP doesn't have an entry for the room.
+     */
+    private getNextLockedAbility(): AbilityId | null {
+        const order: AbilityId[] = ['wallCling', 'dash', 'doubleJump', 'groundPound', 'phaseShift'];
+        for (const id of order) {
+            if (!hasAbility(this.abilityState, id)) return id;
+        }
+        return null;
+    }
+
+    /**
+     * Juice for picking up an ability — flash, freeze, particle burst.
+     * This is the "you got a thing!" moment. Make it feel GOOD.
+     */
+    private pickupJuice(x: number, y: number, abilityId: AbilityId): void {
+        // Screen flash — warm white
+        this.cameras.main.flash(300, 255, 255, 220, false, undefined, 0.6);
+
+        // Brief hitstop — freeze to let it land
+        this.hitstopTimer = 200;
+
+        // Camera zoom pulse — using a tween instead of zoomTo because
+        // Phaser's zoomTo callback fights with itself when chaining.
+        this.cameras.main.zoom = 1; // reset in case a previous zoom was stuck
+        this.tweens.add({
+            targets: this.cameras.main,
+            zoom: 1.15,
+            duration: 150,
+            ease: 'Sine.easeOut',
+            yoyo: true,
+            yoyoDelay: 50,
+            onComplete: () => {
+                this.cameras.main.zoom = 1;
+            },
+        });
+
+        // Particle burst at pickup location
+        if (this.player.dustParticles) {
+            this.player.dustParticles.emitParticleAt(x, y, 12);
+        }
+
+        // Show ability name text — the moth earned this!
+        const ABILITY_NAMES: Record<AbilityId, string> = {
+            wallCling: 'WALL CLING',
+            dash: 'DASH',
+            doubleJump: 'DOUBLE JUMP',
+            groundPound: 'GROUND POUND',
+            phaseShift: 'PHASE SHIFT',
+        };
+        const label = this.add.text(x, y - 20, ABILITY_NAMES[abilityId], {
+            fontFamily: 'monospace',
+            fontSize: '10px',
+            color: '#ffffff',
+            stroke: '#000000',
+            strokeThickness: 2,
+            align: 'center',
+        }).setOrigin(0.5);
+        label.setDepth(20);
+
+        // Float up and fade out
+        this.tweens.add({
+            targets: label,
+            y: label.y - 24,
+            alpha: 0,
+            duration: 1200,
+            ease: 'Power2',
+            onComplete: () => label.destroy(),
+        });
+    }
+
+    // ═══════════════════════════════════════════════════════
+    // ─── Ground Pound: Cracked Floor Breaking ─────────────
+    // ═══════════════════════════════════════════════════════
+
+    /**
+     * Check for cracked floor tiles (`=`) under the impact point and break them.
+     * Called when the moth lands a ground pound.
+     */
+    private breakCrackedFloors(x: number, y: number): void {
+        // Check a small area below the moth's feet
+        const tileCol = Math.floor(x / TILE_SIZE);
+        const tileRow = Math.floor((y + 8) / TILE_SIZE); // slightly below center
+
+        // Check the tile directly below and its neighbors
+        for (let dc = -1; dc <= 1; dc++) {
+            const col = tileCol + dc;
+            if (col < 0 || col >= ROOM_WIDTH) continue;
+
+            for (let dr = 0; dr <= 1; dr++) {
+                const row = tileRow + dr;
+                if (row < 0 || row >= ROOM_HEIGHT) continue;
+
+                const tile = this.layer.getTileAt(col, row);
+                if (tile && tile.index === TileIndex.CRACKED_FLOOR) {
+                    // Remove the cracked floor tile — it's gone!
+                    this.layer.removeTileAt(col, row);
+
+                    // Particle burst at the broken tile
+                    const tileWorldX = col * TILE_SIZE + TILE_SIZE / 2;
+                    const tileWorldY = row * TILE_SIZE + TILE_SIZE / 2;
+                    if (this.player.dustParticles) {
+                        this.player.dustParticles.emitParticleAt(tileWorldX, tileWorldY, 6);
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * Deal AOE damage to all enemies within the ground pound impact zone.
+     * Hits anything within the AOE rectangle centered below the moth.
+     */
+    private groundPoundDamageEnemies(x: number, y: number): void {
+        const halfW = GROUND_POUND.AOE_WIDTH / 2;
+        const aoeTop = y;
+        const aoeBottom = y + GROUND_POUND.AOE_HEIGHT;
+
+        for (const enemy of this.enemies) {
+            if (!enemy.alive) continue;
+
+            const dx = Math.abs(enemy.x - x);
+            const ey = enemy.y;
+
+            if (dx <= halfW && ey >= aoeTop && ey <= aoeBottom) {
+                const hit = enemy.takeDamage(2, x); // ground pound hits HARD
+                if (hit) {
+                    this.cameras.main.shake(80, 0.008);
+                }
+            }
+        }
     }
 }

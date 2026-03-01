@@ -43,3 +43,32 @@ export const WALL = {
     CLING_GRACE_MS: 80,  // ms after leaving wall where wall-jump still works
     INPUT_LOCK_MS: 150,  // ms of forced horizontal velocity after wall jump
 } as const;
+
+/** Dash tuning — flutter burst. */
+export const DASH = {
+    SPEED:        350,   // px/s — horizontal burst velocity
+    DURATION_MS:  120,   // ms the dash lasts
+    COOLDOWN_MS:  400,   // ms before next dash
+} as const;
+
+/** Double jump tuning. */
+export const DOUBLE_JUMP = {
+    VEL:         -260,   // px/s — second jump impulse (slightly weaker than ground jump)
+    MAX_AIR_JUMPS:  1,   // extra jumps allowed while airborne
+} as const;
+
+/** Ground pound tuning — dive-bomb. */
+export const GROUND_POUND = {
+    FALL_SPEED:    450,  // px/s — downward velocity during pound
+    IMPACT_FREEZE_MS: 80, // hitstop on landing
+    IMPACT_SHAKE: 0.015, // camera shake intensity
+    IMPACT_SHAKE_MS: 120, // camera shake duration
+    AOE_WIDTH:      32,  // impact damage zone width (px)
+    AOE_HEIGHT:     16,  // impact damage zone height (px)
+} as const;
+
+/** Phase shift tuning — becoming dust. */
+export const PHASE = {
+    DURATION_MS:   400,  // ms the phase state lasts
+    COOLDOWN_MS:   800,  // ms before next phase shift
+} as const;

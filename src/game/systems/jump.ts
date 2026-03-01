@@ -1,11 +1,12 @@
 /**
  * Pure jump state machine — no Phaser dependency.
  *
- * Handles coyote time, jump buffering, variable-height jump cuts.
+ * Handles coyote time, jump buffering, variable-height jump cuts,
+ * and double jump (when unlocked).
  * Player.ts feeds physics state in, gets back velocity commands.
  */
 
-import { MOVE } from '../data/constants';
+import { MOVE, DOUBLE_JUMP } from '../data/constants';
 
 // ─── Jump State ───
 
@@ -18,6 +19,8 @@ export interface JumpState {
     isJumping: boolean;
     /** edge-detection: was jump held last frame? */
     jumpWasDown: boolean;
+    /** Air jumps remaining this airborne stretch (resets on ground) */
+    airJumpsRemaining: number;
 }
 
 export interface JumpInput {
@@ -29,6 +32,8 @@ export interface JumpInput {
     velocityY: number;
     /** Frame delta in ms */
     delta: number;
+    /** Whether the double jump ability is unlocked */
+    doubleJumpUnlocked?: boolean;
 }
 
 export interface JumpResult {
@@ -44,18 +49,21 @@ export function createJumpState(): JumpState {
         jumpBufferTimer: 0,
         isJumping: false,
         jumpWasDown: false,
+        airJumpsRemaining: 0,
     };
 }
 
 /** Advance the jump state machine by one frame. Pure function. */
 export function updateJump(state: JumpState, input: JumpInput): JumpResult {
-    let { coyoteTimer, jumpBufferTimer, isJumping, jumpWasDown } = state;
+    let { coyoteTimer, jumpBufferTimer, isJumping, jumpWasDown, airJumpsRemaining } = state;
     let newVelocityY: number | null = null;
 
     // ─── Coyote time ───
     if (input.onGround) {
         coyoteTimer = MOVE.COYOTE_MS;
         isJumping = false;
+        // Reset air jumps when grounded
+        airJumpsRemaining = input.doubleJumpUnlocked ? DOUBLE_JUMP.MAX_AIR_JUMPS : 0;
     } else {
         coyoteTimer -= input.delta;
     }
@@ -68,11 +76,18 @@ export function updateJump(state: JumpState, input: JumpInput): JumpResult {
         jumpBufferTimer -= input.delta;
     }
 
-    // ─── Execute jump ───
+    // ─── Execute ground jump (with coyote time) ───
     if (coyoteTimer > 0 && jumpBufferTimer > 0) {
         newVelocityY = MOVE.JUMP_VEL;
         isJumping = true;
         coyoteTimer = 0;
+        jumpBufferTimer = 0;
+    }
+    // ─── Double jump: air jump when coyote expired ───
+    else if (jumpJustPressed && coyoteTimer <= 0 && !input.onGround && airJumpsRemaining > 0) {
+        newVelocityY = DOUBLE_JUMP.VEL;
+        isJumping = true;
+        airJumpsRemaining -= 1;
         jumpBufferTimer = 0;
     }
 
@@ -85,7 +100,7 @@ export function updateJump(state: JumpState, input: JumpInput): JumpResult {
     jumpWasDown = input.jumpHeld;
 
     return {
-        state: { coyoteTimer, jumpBufferTimer, isJumping, jumpWasDown },
+        state: { coyoteTimer, jumpBufferTimer, isJumping, jumpWasDown, airJumpsRemaining },
         newVelocityY,
     };
 }

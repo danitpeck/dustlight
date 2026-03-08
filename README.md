@@ -1,5 +1,7 @@
 # Dustlight
 
+You are a small moth. You are drawn to a light deep inside a vast ruin. You don't speak. You don't have a name (yet). You just move forward.
+
 A 1-bit metroidvania about a moth drawn to a light in a ruined world.
 
 Built with **Phaser 3** + **Vite** + **TypeScript** using the [Kenney 1-Bit Platformer Pack](https://kenney.nl/assets/1-bit-platformer-pack).
